@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:atao_quiz/screens/home_screen.dart';
 import '../theme/colors.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -12,27 +11,30 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
-  late AnimationController _rotationController;
-  late Animation<double> _rotationAnimation;
+  late AnimationController _shadowController;
+  late Animation<double> _shadowAnimation;
   Timer? _navigationTimer;
 
   @override
   void initState() {
     super.initState();
-    
-    _rotationController = AnimationController(
+
+    _shadowController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 3),
+      duration: const Duration(seconds: 4),
     );
-    
-    _rotationAnimation = Tween<double>(
-      begin: 0.0,
-      end: 2 * 3.14159, // Un tour complet
-    ).animate(_rotationController);
-    
-    _rotationController.forward();
-    
-    _navigationTimer = Timer(const Duration(seconds: 3), () {
+
+    // Animation: centre → droite → centre → gauche → centre
+    _shadowAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 60.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: 60.0, end: 0.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: -60.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: -60.0, end: 0.0), weight: 1),
+    ]).animate(_shadowController);
+
+    _shadowController.repeat();
+
+    _navigationTimer = Timer(const Duration(seconds: 10), () {
       if (mounted) {
         _navigateToHome();
       }
@@ -40,55 +42,85 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   void _navigateToHome() {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
-    );
+    Navigator.of(context).pushReplacementNamed('/home');
   }
 
   @override
   void dispose() {
     _navigationTimer?.cancel();
-    _rotationController.stop();
-    _rotationController.dispose();
+    _shadowController.stop();
+    _shadowController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/bg_wave_light.png'),
-            fit: BoxFit.cover,
-          ),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkBackground : AppColors.lightBackground,
         ),
         child: Center(
-          child: Stack(
-            alignment: Alignment.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Ombre jaune fine qui tourne autour du logo
-              AnimatedBuilder(
-                animation: _rotationAnimation,
-                builder: (context, child) {
-                  return Transform.rotate(
-                    angle: _rotationAnimation.value,
-                    child: Container(
-                      width: 180,
-                      height: 180,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.accentYellow.withOpacity(0.6),
-                            blurRadius: 12,
-                            spreadRadius: 1,
+              // Logo + animated shadow
+              SizedBox(
+                width: 460,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    AnimatedBuilder(
+                      animation: _shadowAnimation,
+                      builder: (context, child) {
+                        return Transform.translate(
+                          offset: Offset(_shadowAnimation.value, 0),
+                          child: Container(
+                            width: 140,
+                            height: 140,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.accentYellow.withOpacity(
+                                    0.6,
+                                  ),
+                                  blurRadius: 12,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
+                        );
+                      },
                     ),
-                  );
-                },
+
+                    Image.asset(
+                      isDark ? 'assets/logo_dark.png' : 'assets/logo_light.png',
+                      fit: BoxFit.contain,
+                    ),
+                  ],
+                ),
+              ),
+
+              // Slogan juste sous le logo
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                child: Text(
+                  "Ataovy lalao ny fianarana,\ miaraka amin'ny AtaoQuiz!",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: isDark
+                        ? AppColors.accentYellow
+                        : AppColors.primaryBlue,
+                  ),
+                ),
               ),
             ],
           ),

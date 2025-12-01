@@ -1,30 +1,58 @@
 import 'package:atao_quiz/screens/home_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/splash_screen.dart';
 import 'theme/colors.dart';
 
 Future<void> main() async {
-  runApp(const AtaoQuizApp());
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final SharedPreferences prefs = await SharedPreferences.getInstance();
+  // saved value: 'light' | 'dark'
+  final String? saved = prefs.getString('themeMode');
+
+  // default to light if no preference
+  ThemeMode initialMode = ThemeMode.light;
+  if (saved == 'dark') {
+    initialMode = ThemeMode.dark;
+  }
+
+  runApp(AtaoQuizApp(initialThemeMode: initialMode));
 }
 
 class AtaoQuizApp extends StatefulWidget {
-  const AtaoQuizApp({super.key});
+  final ThemeMode? initialThemeMode;
+
+  const AtaoQuizApp({super.key, this.initialThemeMode});
 
   @override
   State<AtaoQuizApp> createState() => _AtaoQuizAppState();
 }
 
 class _AtaoQuizAppState extends State<AtaoQuizApp> {
-  ThemeMode _themeMode = ThemeMode.system;
+  ThemeMode _themeMode = ThemeMode.light;
+
+  @override
+  void initState() {
+    super.initState();
+    // Apply initial theme from widget only once during init
+    _themeMode = widget.initialThemeMode ?? ThemeMode.light;
+  }
 
   void _setThemeMode(ThemeMode mode) {
     setState(() {
       _themeMode = mode;
     });
+    // persist the selection (only 'light' or 'dark')
+    SharedPreferences.getInstance().then((prefs) {
+      final String value = mode == ThemeMode.light ? 'light' : 'dark';
+      prefs.setString('themeMode', value);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    // initial theme already applied in initState
     return MaterialApp(
       title: 'AtaoQuiz',
       debugShowCheckedModeBanner: false,

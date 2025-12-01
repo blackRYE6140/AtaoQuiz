@@ -19,6 +19,7 @@ dependencies:
   pdfx: ^2.9.2
   file_picker: ^10.3.6
   flutter_pdfview: ^1.4.3
+  shared_preferences: ^2.1.0
 
 
 dev_dependencies:
@@ -38,8 +39,6 @@ flutter:
   assets:
     - assets/logo_light.png
     - assets/logo_dark.png
-    - assets/bg_wave_light.png
-    - assets/bg_wave_dark.png
     - assets/illustrations/competition.png
     - assets/illustrations/student_welcome.png
     - assets/illustrations/student_welcome1.png

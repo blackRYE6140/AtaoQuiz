@@ -39,7 +39,7 @@ class HomeScreen extends StatelessWidget {
         ),
         leadingWidth: 128,
         actions: [
-          // 👤 Profile icon
+          //  Profile icon
           IconButton(
             icon: Icon(
               Icons.account_circle,
@@ -83,14 +83,14 @@ class HomeScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ----------------------------------------------------------------
-            // 🧑🏻‍🎓 WELCOME BANNER
+            //  WELCOME BANNER
             // ----------------------------------------------------------------
             HomeHeaderCard(),
 
             const SizedBox(height: 25),
 
             // ----------------------------------------------------------------
-            // 📄 SECTIONS (PDF / QUIZ / TRANSFERT)
+            //  SECTIONS (PDF / QUIZ / TRANSFERT)
             // ----------------------------------------------------------------
             Text(
               "Vos modules",
@@ -134,7 +134,7 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 25),
 
             // ----------------------------------------------------------------
-            // 🏆 COMPETITION & SCORE
+            //  COMPETITION & SCORE
             // ----------------------------------------------------------------
             Text(
               "Challenge & Score",

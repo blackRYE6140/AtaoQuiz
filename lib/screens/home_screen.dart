@@ -1,4 +1,5 @@
 import 'package:atao_quiz/components/home_components.dart';
+import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
 import 'package:atao_quiz/screens/pdf/pdf_list_screen.dart';
 import 'package:atao_quiz/screens/profile_screen.dart';
 import 'package:atao_quiz/screens/settings_screen.dart';
@@ -121,7 +122,14 @@ class HomeScreen extends StatelessWidget {
               title: "Quiz générés",
               subtitle: "Questions à 4 choix basées sur vos documents",
               imagePath: "assets/illustrations/quiz_4_choices.png",
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const QuizListScreen(),
+                  ),
+                );
+              },
             ),
 
             HomeSectionCard(

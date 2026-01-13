@@ -17,13 +17,13 @@ class AppColors {
   // rgb(12,15,27) -> hex 0C0F1B, add full opacity (0xFF)
   static const Color darkCard = Color(0xFF0A3D62);
 
-  // ✅ Couleurs sémantiques
+  // Couleurs sémantiques
   static const Color success = Color(0xFF4CAF50);
   static const Color error = Color(0xFFE53935);
   static const Color warning = Color(0xFFFFA000);
   static const Color info = Color(0xFF29B6F6);
 
-  // ⚪ Couleurs utilitaires / neutres
+  // Couleurs utilitaires / neutres
   static const Color gray100 = Color(0xFFF5F5F5);
   static const Color gray800 = Color.fromARGB(255, 10, 58, 92);
   static const Color darkTextSecondary = Color(0xFFA0A0A0);

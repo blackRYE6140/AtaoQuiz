@@ -1,5 +1,9 @@
+import 'package:atao_quiz/screens/generatequiz/generate_quiz_screen.dart';
+import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
 import 'package:atao_quiz/screens/home_screen.dart';
+import 'package:atao_quiz/services/storage_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/splash_screen.dart';
 import 'theme/colors.dart';
@@ -7,17 +11,43 @@ import 'theme/colors.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 1. Charger .env AVANT toute utilisation
+  await _loadEnvironment();
+  
+  // 2. Initialiser SharedPreferences
   final SharedPreferences prefs = await SharedPreferences.getInstance();
-  // saved value: 'light' | 'dark'
   final String? saved = prefs.getString('themeMode');
 
-  // default to light if no preference
   ThemeMode initialMode = ThemeMode.light;
   if (saved == 'dark') {
     initialMode = ThemeMode.dark;
   }
-
+  
+  // 3. Initialiser les services
+  await StorageService().initialize(); // Juste pour être sûr
+  
+  // GeminiService s'initialisera lui-même quand nécessaire
+  
   runApp(AtaoQuizApp(initialThemeMode: initialMode));
+}
+
+Future<void> _loadEnvironment() async {
+  try {
+    await dotenv.load(fileName: '.env');
+    print('✅ Fichier .env chargé avec succès');
+    
+    // Vérifier que la clé existe
+    final apiKey = dotenv.env['GEMINI_API_KEY'];
+    if (apiKey == null || apiKey.isEmpty) {
+      print('⚠️ GEMINI_API_KEY non définie dans .env');
+    } else {
+      print('✅ GEMINI_API_KEY trouvée (${apiKey.length} caractères)');
+    }
+  } catch (e) {
+    print('⚠️ Erreur chargement .env: $e');
+    // Créer un .env par défaut pour éviter les crashs
+    dotenv.env['GEMINI_API_KEY'] = '';
+  }
 }
 
 class AtaoQuizApp extends StatefulWidget {
@@ -35,7 +65,6 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> {
   @override
   void initState() {
     super.initState();
-    // Apply initial theme from widget only once during init
     _themeMode = widget.initialThemeMode ?? ThemeMode.light;
   }
 
@@ -43,7 +72,6 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> {
     setState(() {
       _themeMode = mode;
     });
-    // persist the selection (only 'light' or 'dark')
     SharedPreferences.getInstance().then((prefs) {
       final String value = mode == ThemeMode.light ? 'light' : 'dark';
       prefs.setString('themeMode', value);
@@ -52,7 +80,6 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> {
 
   @override
   Widget build(BuildContext context) {
-    // initial theme already applied in initState
     return MaterialApp(
       title: 'AtaoQuiz',
       debugShowCheckedModeBanner: false,
@@ -66,12 +93,14 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> {
           onThemeModeChanged: _setThemeMode,
           currentThemeMode: _themeMode,
         ),
+        '/quiz-list': (context) => const QuizListScreen(),
+        '/generate-quiz': (context) => const GenerateQuizScreen(),
       },
     );
   }
 }
 
-///  Thème clair
+/// Thème clair
 final ThemeData _lightTheme = ThemeData(
   brightness: Brightness.light,
   primaryColor: AppColors.primaryBlue,

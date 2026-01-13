@@ -34,7 +34,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     _shadowController.repeat();
 
-    _navigationTimer = Timer(const Duration(seconds: 10), () {
+    _navigationTimer = Timer(const Duration(seconds: 4), () {
       if (mounted) {
         _navigateToHome();
       }

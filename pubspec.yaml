@@ -17,10 +17,12 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_launcher_icons: ^0.14.4
   pdfx: ^2.9.2
-  file_picker: ^10.3.6
+  file_picker: ^10.3.8
   flutter_pdfview: ^1.4.3
   shared_preferences: ^2.1.0
-
+  flutter_dotenv: ^6.0.0
+  http: ^0.13.6
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
@@ -37,6 +39,7 @@ flutter_icons:
 flutter:
   uses-material-design: true
   assets:
+    - assets/logo.png
     - assets/logo_light.png
     - assets/logo_dark.png
     - assets/illustrations/competition.png
@@ -47,6 +50,7 @@ flutter:
     - assets/illustrations/file_transfer.png
     - assets/illustrations/trophy_success.png
     - assets/illustrations/dashboard.png
+    - .env
 
   fonts:
     - family: Poppins

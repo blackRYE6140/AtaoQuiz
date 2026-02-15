@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/colors.dart';
+import 'security_setup_dialog.dart';
 
 class SettingsScreen extends StatefulWidget {
   final Function(ThemeMode)? onThemeModeChanged;
@@ -113,6 +114,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       : AppColors.lightText.withOpacity(0.7),
                 ),
               ),
+            ),
+
+            const SizedBox(height: 24),
+
+            //  Sécurité
+            _SettingsSectionTitle("Sécurité", isDark),
+            const SizedBox(height: 12),
+            _SettingsCard(
+              isDark: isDark,
+              icon: Icons.security,
+              title: "Configuration de sécurité",
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => SecuritySetupDialog(isDark: isDark),
+                ).then((_) {
+                  // Rafraîchir le widget si nécessaire
+                  setState(() {});
+                });
+              },
             ),
 
             const SizedBox(height: 24),

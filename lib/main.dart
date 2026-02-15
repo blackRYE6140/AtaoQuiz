@@ -1,6 +1,8 @@
 import 'package:atao_quiz/screens/generatequiz/generate_quiz_screen.dart';
 import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
 import 'package:atao_quiz/screens/home_screen.dart';
+import 'package:atao_quiz/screens/pin_entry_screen.dart';
+import 'package:atao_quiz/screens/biometric_auth_screen.dart';
 import 'package:atao_quiz/services/storage_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -13,7 +15,7 @@ Future<void> main() async {
 
   // 1. Charger .env AVANT toute utilisation
   await _loadEnvironment();
-  
+
   // 2. Initialiser SharedPreferences
   final SharedPreferences prefs = await SharedPreferences.getInstance();
   final String? saved = prefs.getString('themeMode');
@@ -22,12 +24,12 @@ Future<void> main() async {
   if (saved == 'dark') {
     initialMode = ThemeMode.dark;
   }
-  
+
   // 3. Initialiser les services
   await StorageService().initialize(); // Juste pour être sûr
-  
+
   // GeminiService s'initialisera lui-même quand nécessaire
-  
+
   runApp(AtaoQuizApp(initialThemeMode: initialMode));
 }
 
@@ -35,7 +37,7 @@ Future<void> _loadEnvironment() async {
   try {
     await dotenv.load(fileName: '.env');
     print('✅ Fichier .env chargé avec succès');
-    
+
     // Vérifier que la clé existe
     final apiKey = dotenv.env['GEMINI_API_KEY'];
     if (apiKey == null || apiKey.isEmpty) {
@@ -89,6 +91,8 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> {
       initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),
+        '/pin-entry': (context) => const PinEntryScreen(),
+        '/biometric-entry': (context) => const BiometricAuthScreen(),
         '/home': (context) => HomeScreen(
           onThemeModeChanged: _setThemeMode,
           currentThemeMode: _themeMode,

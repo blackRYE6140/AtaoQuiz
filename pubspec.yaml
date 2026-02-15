@@ -23,6 +23,7 @@ dependencies:
   flutter_dotenv: ^6.0.0
   http: ^0.13.6
   path: ^1.9.1
+  local_auth: ^2.1.0
 
 dev_dependencies:
   flutter_test:

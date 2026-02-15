@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/colors.dart';
+import '../services/security_config_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -41,8 +42,32 @@ class _SplashScreenState extends State<SplashScreen>
     });
   }
 
-  void _navigateToHome() {
-    Navigator.of(context).pushReplacementNamed('/home');
+  Future<void> _navigateToHome() async {
+    final securityConfig = SecurityConfigService();
+    final securityType = await securityConfig.getSecurityType();
+    final isSecurityEnabled = await securityConfig.isSecurityEnabled();
+
+    if (mounted) {
+      late String route;
+
+      if (isSecurityEnabled) {
+        switch (securityType) {
+          case SecurityType.pin:
+            route = '/pin-entry';
+            break;
+          case SecurityType.biometric:
+            route = '/biometric-entry';
+            break;
+          case SecurityType.none:
+            route = '/home';
+            break;
+        }
+      } else {
+        route = '/home';
+      }
+
+      Navigator.of(context).pushReplacementNamed(route);
+    }
   }
 
   @override

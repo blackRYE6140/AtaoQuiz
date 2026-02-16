@@ -143,6 +143,14 @@ class _SystemAuthScreenState extends State<SystemAuthScreen> {
         print('[SystemAuth] Authentication successful, navigating to home');
         Navigator.of(context).pushReplacementNamed('/home');
       } else {
+        final authErrorCode = _authService.lastAuthErrorCode;
+        final authErrorMessage = _authService.lastAuthErrorMessage;
+        if (authErrorCode != null || authErrorMessage != null) {
+          print(
+            '[SystemAuth] Authentication detail code=$authErrorCode message=$authErrorMessage',
+          );
+        }
+
         _attemptCount++;
         print(
           '[SystemAuth] Authentication failed. Attempts: $_attemptCount/$_maxAttempts',

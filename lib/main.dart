@@ -13,6 +13,7 @@ import 'screens/splash_screen.dart';
 import 'theme/colors.dart';
 
 // flutter analyze 2>&1 | grep "error"
+// flutter build apk --release --split-per-abi
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

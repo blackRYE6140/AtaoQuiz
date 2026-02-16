@@ -25,6 +25,11 @@ class SystemAuthService {
   static const String _lockTypesKey = 'device_lock_types';
   static const String _systemAuthEnabledKey = 'system_auth_enabled';
   static const String _lastSecurityHashKey = 'last_security_hash';
+  String? _lastAuthErrorCode;
+  String? _lastAuthErrorMessage;
+
+  String? get lastAuthErrorCode => _lastAuthErrorCode;
+  String? get lastAuthErrorMessage => _lastAuthErrorMessage;
 
   /// Vérifier si le téléphone a un verrou de sécurité
   Future<bool> isDeviceSecured() async {
@@ -181,26 +186,42 @@ class SystemAuthService {
 
   /// Authentifier avec le système
   Future<bool> authenticateWithSystem({String? reason}) async {
+    _lastAuthErrorCode = null;
+    _lastAuthErrorMessage = null;
+
     try {
       final isSupported = await _localAuth.isDeviceSupported();
       if (!isSupported) {
-        debugPrint('[SystemAuthService] Device does not support local auth');
+        _setLastAuthError(
+          code: 'device_not_supported',
+          message: 'Device does not support local auth.',
+        );
         return false;
       }
 
       final result = await _localAuth.authenticate(
         localizedReason: reason ?? 'Authentifiez-vous pour accéder à AtaoQuiz',
         options: const AuthenticationOptions(
-          stickyAuth: true,
+          // On some Android devices, stickyAuth can break device-credential
+          // fallback (PIN/pattern/password) after resume transitions.
+          stickyAuth: false,
           sensitiveTransaction: true,
           biometricOnly: false, // Permet PIN, pattern, password, biométrie
         ),
       );
+
+      if (!result) {
+        _setLastAuthError(
+          code: 'auth_failed_or_canceled',
+          message:
+              'Authentication returned false (canceled by user or credential rejected).',
+        );
+      }
       return result;
     } on PlatformException catch (e) {
-      // We keep a generic bool API for callers but preserve detailed logs.
-      debugPrint(
-        '[SystemAuthService] LocalAuthException (${e.code}): ${e.message}',
+      _setLastAuthError(
+        code: e.code,
+        message: e.message ?? 'PlatformException without message',
       );
       if (e.code == auth_error.notAvailable ||
           e.code == auth_error.notEnrolled ||
@@ -211,7 +232,7 @@ class SystemAuthService {
       }
       return false;
     } catch (e) {
-      debugPrint('Erreur authentification système: $e');
+      _setLastAuthError(code: 'unknown_exception', message: e.toString());
       return false;
     }
   }
@@ -315,5 +336,11 @@ class SystemAuthService {
   String _buildLegacySecurityHash(List<DeviceLockType> lockTypes) {
     final input = lockTypes.map((type) => type.toString()).join(',');
     return input.hashCode.toString();
+  }
+
+  void _setLastAuthError({required String code, required String message}) {
+    _lastAuthErrorCode = code;
+    _lastAuthErrorMessage = message;
+    debugPrint('[SystemAuthService] Auth error code=$code message=$message');
   }
 }

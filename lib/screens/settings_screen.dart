@@ -236,7 +236,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              Navigator.pushReplacementNamed(context, '/');
+              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
             },
             child: const Text(
               "Déconnexion",

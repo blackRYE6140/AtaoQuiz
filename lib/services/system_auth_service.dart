@@ -1,9 +1,12 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:local_auth/error_codes.dart' as auth_error;
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum DeviceLockType {
   pattern, // Schéma de déverrouillage
-  pin, // Code PIN
+  pin, // Verrou système (PIN, schéma ou mot de passe)
   password, // Mot de passe
   biometric, // Biométrie (empreinte, reconnaissance faciale, iris)
   none, // Aucun
@@ -26,16 +29,13 @@ class SystemAuthService {
   /// Vérifier si le téléphone a un verrou de sécurité
   Future<bool> isDeviceSecured() async {
     try {
-      final canCheckBio = await _localAuth.canCheckBiometrics;
-      final isDevSupported = await _localAuth.isDeviceSupported();
-      final result = canCheckBio || isDevSupported;
+      final lockTypes = await getAvailableLockTypes();
+      final result = lockTypes.isNotEmpty;
 
-      print(
-        '[SystemAuthService] isDeviceSecured: $result (canCheckBio=$canCheckBio, isDevSupported=$isDevSupported)',
-      );
+      debugPrint('[SystemAuthService] isDeviceSecured: $result');
       return result;
     } catch (e) {
-      print('[SystemAuthService] ERROR checking device security: $e');
+      debugPrint('[SystemAuthService] ERROR checking device security: $e');
       return false;
     }
   }
@@ -43,76 +43,90 @@ class SystemAuthService {
   /// Obtenir les types de verrous disponibles sur le téléphone
   Future<List<DeviceLockType>> getAvailableLockTypes() async {
     try {
-      print('[SystemAuthService] Checking available lock types...');
+      debugPrint('[SystemAuthService] Checking available lock types...');
 
       final canCheckBio = await _localAuth.canCheckBiometrics;
       final isDevSupported = await _localAuth.isDeviceSupported();
 
-      print(
+      debugPrint(
         '[SystemAuthService] canCheckBiometrics: $canCheckBio, isDeviceSupported: $isDevSupported',
       );
 
-      final biometrics = await _localAuth.getAvailableBiometrics();
-      print('[SystemAuthService] Available biometrics: $biometrics');
+      final Set<DeviceLockType> types = <DeviceLockType>{};
 
-      final List<DeviceLockType> types = [];
-
-      // Vérifier la biométrie disponible
-      if (biometrics.isNotEmpty) {
-        types.add(DeviceLockType.biometric);
-        print('[SystemAuthService] Added biometric lock type');
+      if (canCheckBio) {
+        final biometrics = await _localAuth.getAvailableBiometrics();
+        debugPrint('[SystemAuthService] Available biometrics: $biometrics');
+        if (biometrics.isNotEmpty) {
+          types.add(DeviceLockType.biometric);
+        }
       }
 
       // Vérifier si l'appareil supporte l'authentification (PIN, Pattern, Password, etc)
       if (isDevSupported) {
-        // Ajouter PIN comme fallback ou complément
-        if (types.isEmpty) {
-          types.add(DeviceLockType.pin);
-          print('[SystemAuthService] Added PIN lock type (no biometric)');
-        } else {
-          types.add(DeviceLockType.pin);
-          print('[SystemAuthService] Added PIN lock type (with biometric)');
-        }
+        types.add(DeviceLockType.pin);
       }
 
-      print('[SystemAuthService] Final lock types: $types');
-      return types;
+      final result = types.toList()..sort((a, b) => a.index.compareTo(b.index));
+      debugPrint('[SystemAuthService] Final lock types: $result');
+      return result;
     } catch (e) {
-      print('[SystemAuthService] ERROR getting available lock types: $e');
+      debugPrint('[SystemAuthService] ERROR getting available lock types: $e');
       return [];
     }
   }
 
   /// Activer l'authentification système pour l'app
-  Future<bool> enableSystemAuth() async {
+  Future<bool> enableSystemAuth({
+    bool requireCurrentUserVerification = true,
+  }) async {
     try {
-      print('[SystemAuthService] enableSystemAuth called');
+      debugPrint('[SystemAuthService] enableSystemAuth called');
       final prefs = await SharedPreferences.getInstance();
       final lockTypes = await getAvailableLockTypes();
 
-      print('[SystemAuthService] Available lock types: $lockTypes');
+      debugPrint('[SystemAuthService] Available lock types: $lockTypes');
 
       if (lockTypes.isEmpty) {
-        print('[SystemAuthService] ERROR: No lock types available');
+        debugPrint('[SystemAuthService] ERROR: No lock types available');
+        return false;
+      }
+
+      if (requireCurrentUserVerification) {
+        final isVerified = await authenticateWithSystem(
+          reason: 'Confirmez votre identité pour activer la sécurité',
+        );
+        if (!isVerified) {
+          debugPrint(
+            '[SystemAuthService] User verification failed while enabling auth',
+          );
+          return false;
+        }
+      }
+
+      if (!await isDeviceSecured()) {
+        debugPrint('[SystemAuthService] Device is not secured anymore');
         return false;
       }
 
       // Stocker les types de verrous disponibles
-      final lockTypeStrings = lockTypes.map((type) => type.toString()).toList();
-      print('[SystemAuthService] Storing lock type strings: $lockTypeStrings');
+      final lockTypeStrings = lockTypes.map((type) => type.name).toList();
+      debugPrint(
+        '[SystemAuthService] Storing lock type strings: $lockTypeStrings',
+      );
 
       await prefs.setStringList(_lockTypesKey, lockTypeStrings);
 
       // Activer l'authentification système
       await prefs.setBool(_systemAuthEnabledKey, true);
 
-      // Créer un hash de la sécurité actuelle
-      await _createSecurityHash();
+      // Stocker une signature stable de la sécurité actuelle
+      await _storeSecuritySignature(lockTypes);
 
-      print('[SystemAuthService] System auth enabled successfully');
+      debugPrint('[SystemAuthService] System auth enabled successfully');
       return true;
     } catch (e) {
-      print('[SystemAuthService] ERROR in enableSystemAuth: $e');
+      debugPrint('[SystemAuthService] ERROR in enableSystemAuth: $e');
       return false;
     }
   }
@@ -126,7 +140,7 @@ class SystemAuthService {
       await prefs.remove(_lastSecurityHashKey);
       return true;
     } catch (e) {
-      print('Erreur désactivation auth système: $e');
+      debugPrint('Erreur désactivation auth système: $e');
       return false;
     }
   }
@@ -137,7 +151,7 @@ class SystemAuthService {
       final prefs = await SharedPreferences.getInstance();
       return prefs.getBool(_systemAuthEnabledKey) ?? false;
     } catch (e) {
-      print('Erreur vérification activation auth système: $e');
+      debugPrint('Erreur vérification activation auth système: $e');
       return false;
     }
   }
@@ -148,23 +162,19 @@ class SystemAuthService {
       final prefs = await SharedPreferences.getInstance();
       final lockTypesString = prefs.getStringList(_lockTypesKey) ?? [];
 
-      print(
+      debugPrint(
         '[SystemAuthService] Retrieved stored lock types: $lockTypesString',
       );
 
       final result = lockTypesString
-          .map(
-            (type) => DeviceLockType.values.firstWhere(
-              (e) => e.toString() == type,
-              orElse: () => DeviceLockType.none,
-            ),
-          )
+          .map(_parseStoredLockType)
+          .where((type) => type != DeviceLockType.none)
           .toList();
 
-      print('[SystemAuthService] Converted to DeviceLockType: $result');
+      debugPrint('[SystemAuthService] Converted to DeviceLockType: $result');
       return result;
     } catch (e) {
-      print('[SystemAuthService] ERROR in getEnabledLockTypes: $e');
+      debugPrint('[SystemAuthService] ERROR in getEnabledLockTypes: $e');
       return [];
     }
   }
@@ -172,29 +182,46 @@ class SystemAuthService {
   /// Authentifier avec le système
   Future<bool> authenticateWithSystem({String? reason}) async {
     try {
+      final isSupported = await _localAuth.isDeviceSupported();
+      if (!isSupported) {
+        debugPrint('[SystemAuthService] Device does not support local auth');
+        return false;
+      }
+
       final result = await _localAuth.authenticate(
         localizedReason: reason ?? 'Authentifiez-vous pour accéder à AtaoQuiz',
         options: const AuthenticationOptions(
           stickyAuth: true,
+          sensitiveTransaction: true,
           biometricOnly: false, // Permet PIN, pattern, password, biométrie
         ),
       );
       return result;
+    } on PlatformException catch (e) {
+      // We keep a generic bool API for callers but preserve detailed logs.
+      debugPrint(
+        '[SystemAuthService] LocalAuthException (${e.code}): ${e.message}',
+      );
+      if (e.code == auth_error.notAvailable ||
+          e.code == auth_error.notEnrolled ||
+          e.code == auth_error.passcodeNotSet ||
+          e.code == auth_error.lockedOut ||
+          e.code == auth_error.permanentlyLockedOut) {
+        return false;
+      }
+      return false;
     } catch (e) {
-      print('Erreur authentification système: $e');
+      debugPrint('Erreur authentification système: $e');
       return false;
     }
   }
 
-  /// Créer un hash de l'état actuel de sécurité
-  Future<void> _createSecurityHash() async {
+  /// Arrêter une authentification en cours (utile à la fermeture d'écran)
+  Future<void> stopAuthentication() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final lockTypes = await getAvailableLockTypes();
-      final hash = _generateHash(lockTypes.map((t) => t.toString()).join(','));
-      await prefs.setString(_lastSecurityHashKey, hash);
+      await _localAuth.stopAuthentication();
     } catch (e) {
-      print('Erreur création hash sécurité: $e');
+      debugPrint('Erreur arrêt authentification système: $e');
     }
   }
 
@@ -209,13 +236,22 @@ class SystemAuthService {
       }
 
       final currentLockTypes = await getAvailableLockTypes();
-      final currentHash = _generateHash(
-        currentLockTypes.map((t) => t.toString()).join(','),
-      );
+      final currentSignature = _buildSecuritySignature(currentLockTypes);
 
-      return lastHash != currentHash;
+      if (lastHash == currentSignature) {
+        return false;
+      }
+
+      // Migration de l'ancien format (hashCode) vers signature stable.
+      final legacyHash = _buildLegacySecurityHash(currentLockTypes);
+      if (lastHash == legacyHash) {
+        await prefs.setString(_lastSecurityHashKey, currentSignature);
+        return false;
+      }
+
+      return true;
     } catch (e) {
-      print('Erreur vérification changement sécurité: $e');
+      debugPrint('Erreur vérification changement sécurité: $e');
       return false;
     }
   }
@@ -226,7 +262,7 @@ class SystemAuthService {
       case DeviceLockType.pattern:
         return 'Schéma de déverrouillage';
       case DeviceLockType.pin:
-        return 'Code PIN';
+        return 'Verrouillage appareil (PIN/Schéma/Mot de passe)';
       case DeviceLockType.password:
         return 'Mot de passe';
       case DeviceLockType.biometric:
@@ -247,8 +283,37 @@ class SystemAuthService {
     return labels.join(', ');
   }
 
-  /// Générer un simple hash pour comparer les configurations
-  String _generateHash(String input) {
+  Future<void> _storeSecuritySignature(List<DeviceLockType> lockTypes) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final signature = _buildSecuritySignature(lockTypes);
+      await prefs.setString(_lastSecurityHashKey, signature);
+    } catch (e) {
+      debugPrint('Erreur stockage signature sécurité: $e');
+    }
+  }
+
+  DeviceLockType _parseStoredLockType(String value) {
+    final normalized = value.contains('.') ? value.split('.').last : value;
+    return DeviceLockType.values.firstWhere(
+      (type) => type.name == normalized,
+      orElse: () => DeviceLockType.none,
+    );
+  }
+
+  String _buildSecuritySignature(List<DeviceLockType> lockTypes) {
+    final normalized =
+        lockTypes
+            .where((type) => type != DeviceLockType.none)
+            .map((type) => type.name)
+            .toSet()
+            .toList()
+          ..sort();
+    return normalized.join('|');
+  }
+
+  String _buildLegacySecurityHash(List<DeviceLockType> lockTypes) {
+    final input = lockTypes.map((type) => type.toString()).join(',');
     return input.hashCode.toString();
   }
 }

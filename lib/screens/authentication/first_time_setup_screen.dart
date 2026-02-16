@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme/colors.dart';
 import '../../services/system_auth_service.dart';
 
@@ -54,6 +55,8 @@ class _FirstTimeSetupScreenState extends State<FirstTimeSetupScreen> {
       if (!mounted) return;
 
       if (success) {
+        await _markSetupCompleted();
+
         print('[FirstTimeSetup] System auth enabled successfully');
         setState(() {
           _setupComplete = true;
@@ -84,9 +87,15 @@ class _FirstTimeSetupScreenState extends State<FirstTimeSetupScreen> {
   }
 
   Future<void> _skipSetup() async {
+    await _markSetupCompleted();
     if (mounted) {
       Navigator.of(context).pushReplacementNamed('/home');
     }
+  }
+
+  Future<void> _markSetupCompleted() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_first_time_setup', false);
   }
 
   @override

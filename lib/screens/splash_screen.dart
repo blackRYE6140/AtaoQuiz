@@ -55,8 +55,6 @@ class _SplashScreenState extends State<SplashScreen>
         if (isFirstTime) {
           // Première fois: afficher l'écran de configuration
           route = '/first-time-setup';
-          // Marquer comme non-première fois après
-          await prefs.setBool('is_first_time_setup', false);
         } else {
           // Vérifier si l'auth système est activée
           final isSystemAuthEnabled = await _authService.isSystemAuthEnabled();

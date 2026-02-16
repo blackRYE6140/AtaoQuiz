@@ -27,7 +27,9 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
 
     try {
       final isEnabled = await _authService.isSystemAuthEnabled();
-      final lockTypes = await _authService.getEnabledLockTypes();
+      final lockTypes = isEnabled
+          ? await _authService.getAvailableLockTypes()
+          : <DeviceLockType>[];
 
       setState(() {
         _isSystemAuthEnabled = isEnabled;
@@ -46,58 +48,116 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
     // Afficher un dialogue de confirmation
     final shouldDisable = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Désactiver la sécurité'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Êtes-vous sûr de vouloir désactiver la sécurité de AtaoQuiz ?',
+      builder: (context) {
+        final dialogIsDark = Theme.of(context).brightness == Brightness.dark;
+        final titleColor = dialogIsDark
+            ? AppColors.darkText
+            : AppColors.lightText;
+        final secondaryColor = dialogIsDark
+            ? AppColors.darkTextSecondary
+            : AppColors.lightTextSecondary;
+        final cardColor = dialogIsDark
+            ? AppColors.darkCard
+            : AppColors.lightCard;
+        final primaryColor = dialogIsDark
+            ? AppColors.accentYellow
+            : AppColors.primaryBlue;
+
+        return AlertDialog(
+          backgroundColor: cardColor,
+          title: Text(
+            'Désactiver la sécurité',
+            style: TextStyle(
+              fontFamily: 'Poppins',
+              fontWeight: FontWeight.w600,
+              color: titleColor,
             ),
-            const SizedBox(height: 15),
-            Text(
-              'Méthodes de sécurité actuelles:',
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.white
-                    : Colors.black,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Êtes-vous sûr de vouloir désactiver la sécurité de AtaoQuiz ?',
+                style: TextStyle(fontFamily: 'Poppins', color: titleColor),
+              ),
+              const SizedBox(height: 15),
+              Text(
+                'Méthodes de sécurité actuelles:',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                  color: titleColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (_enabledLockTypes.isEmpty)
+                Text(
+                  'Aucune méthode détectée',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 13,
+                    color: secondaryColor,
+                  ),
+                )
+              else
+                ..._enabledLockTypes.map(
+                  (type) => Padding(
+                    padding: const EdgeInsets.only(left: 16, top: 4),
+                    child: Text(
+                      '• ${_authService.getLockTypeLabel(type)}',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        fontSize: 13,
+                        color: secondaryColor,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(
+                'Annuler',
+                style: TextStyle(fontFamily: 'Poppins', color: primaryColor),
               ),
             ),
-            const SizedBox(height: 8),
-            ..._enabledLockTypes.map(
-              (type) => Padding(
-                padding: const EdgeInsets.only(left: 16, top: 4),
-                child: Text(
-                  '• ${_authService.getLockTypeLabel(type)}',
-                  style: const TextStyle(fontSize: 13),
-                ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Désactiver',
+                style: TextStyle(fontFamily: 'Poppins', color: AppColors.error),
               ),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Annuler'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Désactiver',
-              style: TextStyle(color: Colors.red),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
     if (shouldDisable != true) return;
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
     try {
+      final isVerified = await _authService.authenticateWithSystem(
+        reason: 'Confirmez votre identité pour désactiver la sécurité AtaoQuiz',
+      );
+
+      if (!isVerified) {
+        if (!mounted) return;
+        setState(() {
+          _errorMessage =
+              'Vérification d\'identité requise pour désactiver la sécurité';
+          _isLoading = false;
+        });
+        return;
+      }
+
       final success = await _authService.disableSystemAuth();
 
       if (!mounted) return;
@@ -129,9 +189,73 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
     }
   }
 
+  Future<void> _enableSystemAuth() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final isDeviceSecured = await _authService.isDeviceSecured();
+      if (!isDeviceSecured) {
+        if (!mounted) return;
+        setState(() {
+          _errorMessage =
+              'Aucun verrou système détecté. Activez un PIN/mot de passe/biométrie dans les paramètres du téléphone.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final success = await _authService.enableSystemAuth();
+      if (!mounted) return;
+
+      if (success) {
+        final lockTypes = await _authService.getAvailableLockTypes();
+        if (!mounted) return;
+
+        setState(() {
+          _isSystemAuthEnabled = true;
+          _enabledLockTypes = lockTypes;
+          _isLoading = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sécurité activée'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        setState(() {
+          _errorMessage =
+              'Impossible d\'activer la sécurité. Vérifiez la configuration de verrouillage Android.';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Erreur: $e';
+        _isLoading = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor = isDark
+        ? AppColors.accentYellow
+        : AppColors.primaryBlue;
+    final textColor = isDark ? AppColors.darkText : AppColors.lightText;
+    final secondaryTextColor = isDark
+        ? AppColors.darkTextSecondary
+        : AppColors.lightTextSecondary;
+    final onPrimaryColor = isDark ? Colors.black : Colors.white;
+    final infoBackground = primaryColor.withValues(alpha: 0.12);
+    final warningBackground = AppColors.error.withValues(alpha: 0.12);
+    final neutralBackground = secondaryTextColor.withValues(alpha: 0.12);
 
     return Scaffold(
       appBar: AppBar(
@@ -139,7 +263,7 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
         backgroundColor: isDark
             ? AppColors.darkBackground
             : AppColors.lightBackground,
-        foregroundColor: isDark ? AppColors.darkText : AppColors.lightText,
+        foregroundColor: textColor,
         elevation: 0,
       ),
       backgroundColor: isDark
@@ -161,7 +285,7 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
+                          color: warningBackground,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -169,7 +293,7 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                           style: TextStyle(
                             fontFamily: 'Poppins',
                             fontSize: 12,
-                            color: Colors.red[400],
+                            color: AppColors.error,
                           ),
                         ),
                       ),
@@ -179,27 +303,47 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                           Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
+                              color: infoBackground,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(
                               children: [
-                                Icon(
-                                  Icons.info_outline,
-                                  color: Colors.blue[400],
-                                ),
+                                Icon(Icons.info_outline, color: primaryColor),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
-                                    'L\'authentification système n\'est pas activée',
+                                    'L\'authentification système est désactivée.',
                                     style: TextStyle(
                                       fontFamily: 'Poppins',
                                       fontSize: 13,
-                                      color: Colors.blue[400],
+                                      color: primaryColor,
                                     ),
                                   ),
                                 ),
                               ],
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 50,
+                            child: ElevatedButton(
+                              onPressed: _enableSystemAuth,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: primaryColor,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              child: Text(
+                                'Activer la sécurité',
+                                style: TextStyle(
+                                  fontFamily: 'Poppins',
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: onPrimaryColor,
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -214,20 +358,14 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                               fontFamily: 'Poppins',
                               fontSize: 18,
                               fontWeight: FontWeight.w600,
-                              color: isDark
-                                  ? AppColors.darkText
-                                  : AppColors.lightText,
+                              color: textColor,
                             ),
                           ),
                           const SizedBox(height: 12),
                           Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: isDark
-                                  ? AppColors.darkTextSecondary.withOpacity(0.1)
-                                  : AppColors.lightTextSecondary.withOpacity(
-                                      0.1,
-                                    ),
+                              color: neutralBackground,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Column(
@@ -237,7 +375,7 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                                   children: [
                                     Icon(
                                       Icons.check_circle,
-                                      color: Colors.green[400],
+                                      color: AppColors.success,
                                       size: 20,
                                     ),
                                     const SizedBox(width: 10),
@@ -247,7 +385,7 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                                         fontFamily: 'Poppins',
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
-                                        color: Colors.green[400],
+                                        color: AppColors.success,
                                       ),
                                     ),
                                   ],
@@ -259,44 +397,48 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                                     fontFamily: 'Poppins',
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
-                                    color: isDark
-                                        ? AppColors.darkTextSecondary
-                                        : AppColors.lightTextSecondary,
+                                    color: secondaryTextColor,
                                   ),
                                 ),
                                 const SizedBox(height: 8),
-                                ..._enabledLockTypes.map(
-                                  (type) => Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 4,
+                                if (_enabledLockTypes.isEmpty)
+                                  Text(
+                                    'Aucune méthode détectée',
+                                    style: TextStyle(
+                                      fontFamily: 'Poppins',
+                                      fontSize: 13,
+                                      color: secondaryTextColor,
                                     ),
-                                    child: Row(
-                                      children: [
-                                        Text(
-                                          '• ',
-                                          style: TextStyle(
-                                            fontFamily: 'Poppins',
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: isDark
-                                                ? AppColors.accentYellow
-                                                : AppColors.primaryBlue,
+                                  )
+                                else
+                                  ..._enabledLockTypes.map(
+                                    (type) => Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 4,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Text(
+                                            '• ',
+                                            style: TextStyle(
+                                              fontFamily: 'Poppins',
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: primaryColor,
+                                            ),
                                           ),
-                                        ),
-                                        Text(
-                                          _authService.getLockTypeLabel(type),
-                                          style: TextStyle(
-                                            fontFamily: 'Poppins',
-                                            fontSize: 13,
-                                            color: isDark
-                                                ? AppColors.darkText
-                                                : AppColors.lightText,
+                                          Text(
+                                            _authService.getLockTypeLabel(type),
+                                            style: TextStyle(
+                                              fontFamily: 'Poppins',
+                                              fontSize: 13,
+                                              color: textColor,
+                                            ),
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
                               ],
                             ),
                           ),
@@ -307,26 +449,26 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                               fontFamily: 'Poppins',
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
-                              color: Colors.red[400],
+                              color: AppColors.error,
                             ),
                           ),
                           const SizedBox(height: 12),
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.red.withOpacity(0.1),
+                              color: warningBackground,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '⚠️ Si vous désactivez la sécurité:',
+                                  'Si vous désactivez la sécurité:',
                                   style: TextStyle(
                                     fontFamily: 'Poppins',
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
-                                    color: Colors.red[400],
+                                    color: AppColors.error,
                                   ),
                                 ),
                                 const SizedBox(height: 8),
@@ -337,7 +479,7 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                                   style: TextStyle(
                                     fontFamily: 'Poppins',
                                     fontSize: 12,
-                                    color: Colors.red[400],
+                                    color: AppColors.error,
                                   ),
                                 ),
                               ],
@@ -350,7 +492,7 @@ class _SystemAuthManageScreenState extends State<SystemAuthManageScreen> {
                             child: ElevatedButton(
                               onPressed: _disableSystemAuth,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red[400],
+                                backgroundColor: AppColors.error,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10),
                                 ),

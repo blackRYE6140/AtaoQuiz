@@ -5,6 +5,7 @@ import 'package:atao_quiz/screens/generatequiz/generate_quiz_screen.dart';
 import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
 import 'package:atao_quiz/screens/home_screen.dart';
 import 'package:atao_quiz/services/storage_service.dart';
+import 'package:atao_quiz/services/system_auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -39,17 +40,17 @@ Future<void> main() async {
 Future<void> _loadEnvironment() async {
   try {
     await dotenv.load(fileName: '.env');
-    print('✅ Fichier .env chargé avec succès');
+    print(' Fichier .env chargé avec succès');
 
     // Vérifier que la clé existe
     final apiKey = dotenv.env['GEMINI_API_KEY'];
     if (apiKey == null || apiKey.isEmpty) {
-      print('⚠️ GEMINI_API_KEY non définie dans .env');
+      print(' GEMINI_API_KEY non définie dans .env');
     } else {
-      print('✅ GEMINI_API_KEY trouvée (${apiKey.length} caractères)');
+      print(' GEMINI_API_KEY trouvée (${apiKey.length} caractères)');
     }
   } catch (e) {
-    print('⚠️ Erreur chargement .env: $e');
+    print(' Erreur chargement .env: $e');
     // Créer un .env par défaut pour éviter les crashs
     dotenv.env['GEMINI_API_KEY'] = '';
   }
@@ -64,13 +65,41 @@ class AtaoQuizApp extends StatefulWidget {
   State<AtaoQuizApp> createState() => _AtaoQuizAppState();
 }
 
-class _AtaoQuizAppState extends State<AtaoQuizApp> {
+class _AtaoQuizAppState extends State<AtaoQuizApp> with WidgetsBindingObserver {
   ThemeMode _themeMode = ThemeMode.light;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final _AppRouteObserver _routeObserver = _AppRouteObserver();
+  final SystemAuthService _authService = SystemAuthService();
+  bool _lockOnNextResume = false;
+  bool _isNavigatingToLockScreen = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _themeMode = widget.initialThemeMode ?? ThemeMode.light;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _lockOnNextResume = !_isExcludedFromResumeLock(
+        _routeObserver.currentRouteName,
+      );
+      return;
+    }
+
+    if (state == AppLifecycleState.resumed) {
+      _lockAppOnResumeIfNeeded();
+    }
   }
 
   void _setThemeMode(ThemeMode mode) {
@@ -83,11 +112,51 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> {
     });
   }
 
+  Future<void> _lockAppOnResumeIfNeeded() async {
+    if (!_lockOnNextResume || _isNavigatingToLockScreen) {
+      return;
+    }
+
+    _lockOnNextResume = false;
+
+    final routeAtResume = _routeObserver.currentRouteName;
+    if (_isExcludedFromResumeLock(routeAtResume)) {
+      return;
+    }
+
+    final isSystemAuthEnabled = await _authService.isSystemAuthEnabled();
+    if (!isSystemAuthEnabled) {
+      return;
+    }
+
+    final currentRouteName = _routeObserver.currentRouteName;
+    if (_isExcludedFromResumeLock(currentRouteName)) {
+      return;
+    }
+
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) {
+      return;
+    }
+
+    _isNavigatingToLockScreen = true;
+    navigator.pushNamedAndRemoveUntil('/system-auth', (route) => false);
+    _isNavigatingToLockScreen = false;
+  }
+
+  bool _isExcludedFromResumeLock(String? routeName) {
+    return routeName == '/' ||
+        routeName == '/first-time-setup' ||
+        routeName == '/system-auth';
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'AtaoQuiz',
       debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
+      navigatorObservers: [_routeObserver],
       themeMode: _themeMode,
       theme: _lightTheme,
       darkTheme: _darkTheme,
@@ -122,6 +191,28 @@ final ThemeData _lightTheme = ThemeData(
     secondary: AppColors.accentYellow,
   ),
 );
+
+class _AppRouteObserver extends NavigatorObserver {
+  String? currentRouteName;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    currentRouteName = route.settings.name;
+    super.didPush(route, previousRoute);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    currentRouteName = previousRoute?.settings.name;
+    super.didPop(route, previousRoute);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    currentRouteName = newRoute?.settings.name;
+    super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
+  }
+}
 
 /// Thème sombre
 final ThemeData _darkTheme = ThemeData(

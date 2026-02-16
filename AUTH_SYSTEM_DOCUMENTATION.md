@@ -1,278 +1,178 @@
-# Système d'Authentification AtaoQuiz - Nouveau système basé sur l'authentification système
+# Documentation du système d'authentification AtaoQuiz
 
-## Vue d'ensemble
+## 1) Objectif
+Le système d'authentification d'AtaoQuiz s'appuie sur la sécurité native Android via `local_auth`.
+L'application ne gère pas de PIN propriétaire. Elle utilise le verrouillage déjà configuré sur l'appareil:
+- biométrie (empreinte, visage)
+- verrou appareil (PIN, schéma, mot de passe)
 
-Le système d'authentification d'AtaoQuiz a été complètement restructuré pour utiliser **l'authentification système Android** au lieu d'un PIN personnalisé. Cela signifie que l'application utilisera les méthodes de sécurité configurées au niveau du téléphone (empreinte digitale, reconnaissance faciale, PIN système, motif, mot de passe).
+## 2) Périmètre fonctionnel
+Le système couvre:
+- activation de la sécurité dans l'app
+- déverrouillage à l'ouverture de l'app
+- revérrouillage automatique au retour depuis l'arrière-plan
+- détection de changement de configuration de sécurité Android
+- désactivation sécurisée (avec ré-authentification)
+- réactivation depuis la page de gestion
 
-## Architecture du système
+## 3) Fichiers principaux
 
-### 1. **Services Principaux**
+### Services
+- `lib/services/system_auth_service.dart`
 
-#### `SystemAuthService` (`lib/services/system_auth_service.dart`)
-Le service principal qui gère toute l'authentification système.
+### Écrans
+- `lib/screens/authentication/first_time_setup_screen.dart`
+- `lib/screens/authentication/system_auth_screen.dart`
+- `lib/screens/authentication/system_auth_manage_screen.dart`
+- `lib/screens/splash_screen.dart`
 
-**Fonctionnalités principales:**
-- ✅ **Détection de sécurité**: Vérifier si le téléphone a un verrou de sécurité
-- ✅ **Détection des types de verrous**: Identifier les méthodes disponibles (PIN, empreinte, visage, motif, mot de passe)
-- ✅ **Authentification**: Authentifier via le système Android
-- ✅ **Détection de changements**: Détecter si la configuration de sécurité du téléphone change
-- ✅ **Gestion persistante**: Sauvegarder l'état d'activation et les types de verrous
+### Entrée app et verrouillage lifecycle
+- `lib/main.dart`
 
-### 2. **Écrans d'Interface**
+### Android
+- `android/app/src/main/AndroidManifest.xml`
+- `android/app/src/main/kotlin/com/example/atao_quiz/MainActivity.kt`
+- `android/app/src/main/res/values/styles.xml`
+- `android/app/src/main/res/values-night/styles.xml`
+- `android/app/build.gradle.kts`
 
-#### `FirstTimeSetupScreen` (`lib/screens/first_time_setup_screen.dart`)
-**Première visite de l'application** - Configuration initiale de la sécurité.
+## 4) Méthodes détectées et limites techniques
+`local_auth` ne donne pas le type exact du fallback appareil (PIN vs schéma vs mot de passe).
+Donc l'app affiche volontairement un libellé générique:
+- `Verrouillage appareil (PIN/Schéma/Mot de passe)`
 
-- Si le téléphone n'a **PAS** de sécurité:
-  - ❌ Affiche un dialogue d'avertissement
-  - ✅ Permet de continuer sans sécurité
-  
-- Si le téléphone **A** une sécurité:
-  - ✅ Affiche les méthodes disponibles
-  - ✅ Bouton pour activer la liaison avec l'auth système
-  - ✅ Option pour ignorer la configuration
+Ce comportement est normal côté Android/`local_auth`.
 
-#### `SystemAuthScreen` (`lib/screens/system_auth_screen.dart`)
-**Écran d'authentification** - S'affiche à chaque entrée dans l'app si l'auth système est activée.
+## 5) Clés SharedPreferences
+- `is_first_time_setup` (bool)
+  - `true` par défaut: première configuration à faire
+  - passe à `false` après activation de sécurité ou après "Ignorer"
+- `system_auth_enabled` (bool)
+  - active/désactive le verrouillage de l'app
+- `device_lock_types` (List<String>)
+  - types disponibles au moment de l'activation
+- `last_security_hash` (String)
+  - signature stable de config sécurité pour détecter les changements
 
-- Affiche un dialogue d'authentification native Android
-- Permet d'utiliser:
-  - 📱 Empreinte digitale
-  - 😊 Reconnaissance faciale
-  - 🔢 PIN système
-  - 🔷 Motif de déverrouillage
-  - 🔑 Mot de passe
-  
-- **Détection des changements de sécurité**:
-  - Si la configuration change, l'app se verrouille automatiquement
-  - Message: "La configuration de sécurité de votre appareil a changé"
-  - Redirection vers l'écran de configuration
+## 6) Flux applicatif
 
-#### `SystemAuthManageScreen` (`lib/screens/system_auth_manage_screen.dart`)
-**Gestion de la sécurité** - Accessible depuis Paramètres → Sécurité.
+### Premier lancement
+1. `SplashScreen` lit `is_first_time_setup`.
+2. Si `true`, route vers `/first-time-setup`.
+3. Utilisateur peut:
+   - activer la sécurité
+   - ignorer pour le moment
+4. Dans les deux cas, `is_first_time_setup` devient `false`.
 
-- Affiche l'état actuel:
-  - ✅ Si activée: liste les méthodes utilisées
-  - ❌ Si désactivée: explique qu'elle n'est pas activée
-  
-- **Fonctionnalités:**
-  - ✅ Désactiver la sécurité (avec confirmation + affichage des risques)
-  - ✅ Voir les détails des méthodes actuelles
-  - ✅ Avertissements sur les risques de désactivation
+### Lancements suivants
+1. `SplashScreen` lit `system_auth_enabled`.
+2. Si `true`, route vers `/system-auth`.
+3. Si auth réussie, route vers `/home`.
 
-### 3. **Flux d'utilisation**
+### Retour depuis arrière-plan
+`main.dart` observe le cycle de vie.
+- sur `inactive/paused/hidden`: arme un verrou au prochain `resumed`
+- sur `resumed`: si sécurité activée et route éligible, redirige vers `/system-auth`
 
-#### Premier lancement de l'app:
+Routes exclues du reverrouillage automatique:
+- `/`
+- `/first-time-setup`
+- `/system-auth`
+
+## 7) Changement de configuration Android
+Au chargement de `/system-auth`, l'app compare la signature sécurité courante avec la signature stockée.
+
+Si changement détecté:
+1. l'auth app est désactivée
+2. message explicite affiché
+3. redirection forcée vers `/first-time-setup`
+
+Ce mécanisme évite les boucles de verrouillage et force une reconfiguration propre.
+
+## 8) Page "Gestion de la sécurité"
+`SystemAuthManageScreen` permet:
+- voir l'état actuel
+- activer la sécurité
+- désactiver la sécurité
+
+Règles importantes:
+- l'activation vérifie qu'un verrou Android existe réellement
+- la désactivation exige une ré-authentification utilisateur
+- la liste des méthodes affichées est rafraîchie à partir de l'état réel de l'appareil
+- UI alignée avec les couleurs du thème de l'app (sans emoji)
+
+## 9) Configuration Android obligatoire
+
+### 9.1 Permissions
+Dans `android/app/src/main/AndroidManifest.xml`:
+```xml
+<uses-permission android:name="android.permission.USE_BIOMETRIC" />
+<uses-permission android:name="android.permission.USE_FINGERPRINT" />
 ```
-SplashScreen
-    ↓
-FirstTimeSetupScreen (détection répertoire)
-    ↓
-    ├─ Si pas de sécurité → Dialogue d'avertissement
-    │                   ↓
-    │          Ignorer / Continuer sans sécurité
-    │
-    └─ Si sécurité OK → Affichage des méthodes
-                   ↓
-                Bouton "Activer" / "Ignorer"
-                   ↓
-         Si "Activer" → HomeScreen
-         Si "Ignorer" → HomeScreen
+
+### 9.2 Activity
+`local_auth` exige une `FragmentActivity`.
+Dans `android/app/src/main/kotlin/com/example/atao_quiz/MainActivity.kt`:
+```kotlin
+class MainActivity : FlutterFragmentActivity()
 ```
 
-#### Lancements suivants:
-```
-SplashScreen
-    ↓
-SystemAuthScreen (si auth système activée)
-    ↓
-Authentification native Android
-    ↓
-    ├─ Succès → HomeScreen
-    │
-    └─ Échec → Message d'erreur + Réessayer
-              (Max 5 tentatives)
+### 9.3 Thème Android (compatibilité prompt biométrique)
+Dans:
+- `android/app/src/main/res/values/styles.xml`
+- `android/app/src/main/res/values-night/styles.xml`
+
+`LaunchTheme` et `NormalTheme` doivent hériter de:
+```xml
+@style/Theme.AppCompat.DayNight.NoActionBar
 ```
 
-#### Détection de changement de sécurité:
-```
-SystemAuthScreen
-    ↓
-hasSecurityConfigChanged() = true
-    ↓
-Message: "Configuration modifiée"
-    ↓
-Redirection vers SplashScreen
-    ↓
-Nouvelle configuration requise
+### 9.4 Durcissement manifest
+Dans `AndroidManifest.xml`:
+```xml
+android:allowBackup="false"
 ```
 
-## Fichiers modifiés et créés
+### 9.5 Gradle
+`android/app/build.gradle.kts`:
+- Kotlin + Android plugin Flutter standard
+- `minSdk = flutter.minSdkVersion`
+- `targetSdk = flutter.targetSdkVersion`
 
-### Fichiers créés:
-- ✅ `lib/services/system_auth_service.dart` - Service principal
-- ✅ `lib/screens/first_time_setup_screen.dart` - Configuration initiale
-- ✅ `lib/screens/system_auth_screen.dart` - Authentification
-- ✅ `lib/screens/system_auth_manage_screen.dart` - Gestion des paramètres
-
-### Fichiers modifiés:
-- ✅ `lib/main.dart` - Ajout des nouvelles routes
-- ✅ `lib/screens/splash_screen.dart` - Nouveau flux d'authentification
-- ✅ `lib/screens/settings_screen.dart` - Lien vers gestion de sécurité
-
-### Fichiers existants (inchangés mais toujours disponibles):
-- `lib/screens/biometric_auth_screen.dart` - Peuvent être supprimés ou gardés
-- `lib/screens/pin_entry_screen.dart` - Peuvent être supprimés ou gardés
-- `lib/services/security_config_service.dart` - Peuvent être supprimés
-- `lib/services/pin_service.dart` - Peuvent être supprimés
-
-## Configuration de SharedPreferences
-
-Clés utilisées:
+## 10) Paramètres local_auth utilisés
+Dans `SystemAuthService.authenticateWithSystem()`:
 ```dart
-'is_first_time_setup'           // bool: true si première visite
-'system_auth_enabled'           // bool: true si auth système activée
-'device_lock_types'             // List<String>: types de verrous disponibles
-'last_security_hash'            // String: hash pour détecter les changements
+AuthenticationOptions(
+  stickyAuth: true,
+  sensitiveTransaction: true,
+  biometricOnly: false,
+)
 ```
 
-## Types de verrous supportés
+Signification:
+- `stickyAuth: true`: meilleure continuité pendant les transitions d'app
+- `sensitiveTransaction: true`: contexte sensible explicite
+- `biometricOnly: false`: autorise fallback appareil (PIN/schéma/mot de passe)
 
-```dart
-enum DeviceLockType {
-  pattern,    // 🔷 Motif de déverrouillage
-  pin,        // 🔢 Code PIN
-  password,   // 🔑 Mot de passe
-  biometric,  // 👁️ Reconnaissance faciale / Empreinte / Iris
-  none,       // ❌ Aucun verrou
-}
-```
+## 11) Robustesse et migration
+Le système migre automatiquement l'ancien format de hash instable (`hashCode`) vers une signature stable.
+Cela évite les faux positifs de "configuration modifiée" après redémarrage.
 
-## Flux de sécurité détaillé
+## 12) Checklist de validation recommandée
+1. Première ouverture avec verrou Android actif
+2. Première ouverture sans verrou Android actif
+3. Activation depuis setup initial
+4. Activation depuis gestion sécurité après "Ignorer"
+5. Désactivation depuis gestion sécurité (avec ré-auth)
+6. Réactivation après désactivation
+7. Auth au lancement app
+8. Reverrouillage après retour background
+9. Changement de verrou Android puis relance app
+10. Comportement sur petit écran et grand écran
 
-### Activation initiale:
-1. App détecte première visite
-2. Affiche `FirstTimeSetupScreen`
-3. Vérifie si appareil a sécurité
-4. Si oui:
-   - Récupère types disponibles
-   - Affiche options
-   - Crée hash de sécurité
-   - Stocke en SharedPreferences
-5. Navigue vers `HomeScreen`
+## 13) Limites connues
+- Android ne fournit pas le détail exact PIN vs schéma vs mot de passe via `local_auth`.
+- L'app affiche donc un libellé générique pour le verrou appareil.
 
-### Accès à l'app (après configuration):
-1. Affiche `SystemAuthScreen`
-2. Lance authentification native
-3. Vérifie si configuration a changé:
-   - Calcule nouveau hash
-   - Compare avec hash stocké
-   - Si différent → Redirection vers reconfiguration
-4. Si succès → Accès à `HomeScreen`
-5. Si échec → Compteur de tentatives
-
-### Gestion de la sécurité (Paramètres):
-1. Utilisateur ouvre Paramètres
-2. Clique sur "Gestion de la sécurité"
-3. Affiche `SystemAuthManageScreen`
-4. Peut quitter ou désactiver
-5. Si désactivation:
-   - Dialogue de confirmation
-   - Affiche risques
-   - Affiche méthodes actuelles
-   - Supprime données d'authentification
-
-## Gestion des erreurs
-
-### Scénarios gérés:
-
-#### Pas de verrou de sécurité:
-- ❌ Affiche dialogue d'avertissement
-- ✅ Permet quand même d'utiliser l'app
-- 💡 Recommande d'activer la sécurité
-
-#### Authentification échouée:
-- ❌ Affiche message d'erreur
-- 🔄 Permet de réessayer
-- ⚠️ Limite à 5 tentatives
-- 🔒 Après 5 tentatives: message "Redémarrez l'app"
-
-#### Changement de configuration:
-- 🔍 Détecte automatique
-- ⚠️ Affiche message d'avertissement
-- 📌 Force redirection vers reconfiguration
-
-#### Erreurs réseau/système:
-- Try/catch global pour toutes les opérations
-- Messages d'erreur lisibles
-- Fallback à HomeScreen si nécessaire
-
-## API LocalAuthentication utilisée
-
-```dart
-await _localAuth.authenticate(
-  localizedReason: 'Authentifiez-vous pour accéder à AtaoQuiz',
-  options: const AuthenticationOptions(
-    stickyAuth: true,              // Garder dialogue jusqu'à succès/annulation
-    biometricOnly: false,          // Autoriser PIN/Pattern système aussi
-  ),
-);
-```
-
-## Maintenance et évolution future
-
-### À considérer:
-1. **Notifications**: Alerter utilisateur si sécurité change
-2. **Logs**: Tracer les tentatives d'authentification (RGPD)
-3. **Expiration**: Session timeout configurable
-4. **Biométrie multi-facteur**: Combiner biométrie + PIN
-5. **Endpoint sécurisé**: Valider auth avec backend
-
-## Suppression des anciens systèmes
-
-Pour nettoyer le projet et supprimer l'ancien système PIN:
-
-```bash
-# Fichiers à supprimer (optionnel):
-rm lib/screens/biometric_auth_screen.dart
-rm lib/screens/pin_entry_screen.dart
-rm lib/screens/pin_setup_dialog.dart
-rm lib/screens/security_choice_dialog.dart
-rm lib/screens/security_setup_dialog.dart
-rm lib/services/security_config_service.dart
-rm lib/services/pin_service.dart
-```
-
-Puis mettre à jour les imports dans `lib/main.dart`.
-
-## Tests recommandés
-
-```
-✅ Première visite (pas de sécurité)
-✅ Première visite (avec sécurité)
-✅ Authentification réussie
-✅ Authentification échouée
-✅ 5 tentatives échouées
-✅ Changement de PIN système
-✅ Activation de nouvelle biométrie
-✅ Désactivation de sécurité
-✅ Réactivation de sécurité
-✅ Changement de thème clair/sombre
-```
-
-## Support et dépannage
-
-### L'app ne demande pas l'authentification:
-→ Vérifier `SharedPreferences` pour `system_auth_enabled`
-
-### Dialog d'authentification ne s'affiche pas:
-→ Vérifier que le téléphone a au moins un verrou activé
-
-### App se verrouille sans raison:
-→ Vous avez probablement changé la config de sécurité du système
-
----
-
-**Version**: 1.0  
-**Date**: 2026-02-16  
-**Auteur**: AtaoQuiz Auth Team
+## 14) Date de mise à jour
+- 16 février 2026

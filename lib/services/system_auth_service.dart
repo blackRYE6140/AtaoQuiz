@@ -22,6 +22,9 @@ class SystemAuthService {
   SystemAuthService._internal();
 
   final LocalAuthentication _localAuth = LocalAuthentication();
+  static const MethodChannel _deviceCredentialChannel = MethodChannel(
+    'atao_quiz/device_credential',
+  );
   static const String _lockTypesKey = 'device_lock_types';
   static const String _systemAuthEnabledKey = 'system_auth_enabled';
   static const String _lastSecurityHashKey = 'last_security_hash';
@@ -60,10 +63,17 @@ class SystemAuthService {
       final Set<DeviceLockType> types = <DeviceLockType>{};
 
       if (canCheckBio) {
-        final biometrics = await _localAuth.getAvailableBiometrics();
-        debugPrint('[SystemAuthService] Available biometrics: $biometrics');
-        if (biometrics.isNotEmpty) {
-          types.add(DeviceLockType.biometric);
+        try {
+          final biometrics = await _localAuth.getAvailableBiometrics();
+          debugPrint('[SystemAuthService] Available biometrics: $biometrics');
+          if (biometrics.isNotEmpty) {
+            types.add(DeviceLockType.biometric);
+          }
+        } catch (e) {
+          // Some devices throw while listing biometrics. Keep fallback auth.
+          debugPrint(
+            '[SystemAuthService] getAvailableBiometrics failed, fallback to device credential: $e',
+          );
         }
       }
 
@@ -83,7 +93,7 @@ class SystemAuthService {
 
   /// Activer l'authentification système pour l'app
   Future<bool> enableSystemAuth({
-    bool requireCurrentUserVerification = true,
+    bool requireCurrentUserVerification = false,
   }) async {
     try {
       debugPrint('[SystemAuthService] enableSystemAuth called');
@@ -202,8 +212,8 @@ class SystemAuthService {
       final result = await _localAuth.authenticate(
         localizedReason: reason ?? 'Authentifiez-vous pour accéder à AtaoQuiz',
         options: const AuthenticationOptions(
-          // On some Android devices, stickyAuth can break device-credential
-          // fallback (PIN/pattern/password) after resume transitions.
+          // Keep this false to avoid OEM-specific loops when switching from
+          // biometric prompt to credential screens.
           stickyAuth: false,
           sensitiveTransaction: true,
           biometricOnly: false, // Permet PIN, pattern, password, biométrie
@@ -216,6 +226,17 @@ class SystemAuthService {
           message:
               'Authentication returned false (canceled by user or credential rejected).',
         );
+
+        // Ensure no residual prompt is still active before manual fallback.
+        await stopAuthentication();
+
+        final fallbackSuccess =
+            await _authenticateWithDeviceCredentialFallback();
+        if (fallbackSuccess) {
+          _lastAuthErrorCode = null;
+          _lastAuthErrorMessage = null;
+          return true;
+        }
       }
       return result;
     } on PlatformException catch (e) {
@@ -223,6 +244,15 @@ class SystemAuthService {
         code: e.code,
         message: e.message ?? 'PlatformException without message',
       );
+
+      await stopAuthentication();
+      final fallbackSuccess = await _authenticateWithDeviceCredentialFallback();
+      if (fallbackSuccess) {
+        _lastAuthErrorCode = null;
+        _lastAuthErrorMessage = null;
+        return true;
+      }
+
       if (e.code == auth_error.notAvailable ||
           e.code == auth_error.notEnrolled ||
           e.code == auth_error.passcodeNotSet ||
@@ -336,6 +366,50 @@ class SystemAuthService {
   String _buildLegacySecurityHash(List<DeviceLockType> lockTypes) {
     final input = lockTypes.map((type) => type.toString()).join(',');
     return input.hashCode.toString();
+  }
+
+  Future<bool> _authenticateWithDeviceCredentialFallback() async {
+    try {
+      final isAvailable =
+          await _deviceCredentialChannel.invokeMethod<bool>(
+            'isDeviceCredentialAvailable',
+          ) ??
+          false;
+      if (!isAvailable) {
+        return false;
+      }
+
+      final isAuthenticated =
+          await _deviceCredentialChannel.invokeMethod<bool>(
+            'authenticateWithDeviceCredential',
+            const <String, String>{
+              'title': 'Authentification requise',
+              'description': 'Entrez votre schéma, PIN ou mot de passe',
+            },
+          ) ??
+          false;
+
+      if (!isAuthenticated) {
+        _setLastAuthError(
+          code: 'device_credential_failed_or_canceled',
+          message: 'Device credential authentication returned false.',
+        );
+      }
+
+      return isAuthenticated;
+    } on PlatformException catch (e) {
+      _setLastAuthError(
+        code: 'device_credential_${e.code}',
+        message: e.message ?? 'Device credential platform exception.',
+      );
+      return false;
+    } catch (e) {
+      _setLastAuthError(
+        code: 'device_credential_unknown_exception',
+        message: e.toString(),
+      );
+      return false;
+    }
   }
 
   void _setLastAuthError({required String code, required String message}) {

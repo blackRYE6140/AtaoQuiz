@@ -1,81 +1,81 @@
-# AtaoQuiz Authentication System (Current Implementation)
+# Système d'authentification AtaoQuiz (implémentation actuelle)
 
-## 1. Goal
-AtaoQuiz uses native Android device security for app access control.
-The app does not manage an internal PIN. It relies on the lock method already configured on the device.
+## 1. Objectif
+AtaoQuiz utilise la sécurité native Android pour contrôler l'accès à l'application.
+L'application ne gère pas de PIN interne. Elle s'appuie sur la méthode de verrouillage déjà configurée sur l'appareil.
 
-## 2. Main Components
+## 2. Composants principaux
 
-### Authentication service
+### Service d'authentification
 - `lib/services/system_auth_service.dart`
 
-Responsibilities:
-- discover available lock methods
-- enable/disable app authentication
-- execute runtime authentication
-- run Android-native device credential fallback
-- detect Android security config changes
+Responsabilités:
+- détecter les méthodes de verrouillage disponibles
+- activer/désactiver l'authentification de l'application
+- exécuter l'authentification au runtime
+- lancer le fallback natif Android via identifiants appareil
+- détecter les changements de configuration de sécurité Android
 
-### UI flow screens
+### Écrans du flux
 - `lib/screens/authentication/first_time_setup_screen.dart`
 - `lib/screens/authentication/system_auth_screen.dart`
 - `lib/screens/authentication/system_auth_manage_screen.dart`
 - `lib/screens/splash_screen.dart`
 
-### Lifecycle lock guard
+### Verrouillage au cycle de vie
 - `lib/main.dart`
 
-### Android native integration
+### Intégration Android native
 - `android/app/src/main/kotlin/com/example/atao_quiz/MainActivity.kt`
 - `android/app/src/main/AndroidManifest.xml`
 - `android/app/src/main/res/values/styles.xml`
 - `android/app/src/main/res/values-night/styles.xml`
 - `android/app/build.gradle.kts`
 
-## 3. Supported Methods and Labels
-Detected lock types:
-- biometrics
-- device credential fallback
+## 3. Méthodes supportées et libellés
+Types détectés:
+- biométrie
+- fallback identifiants appareil
 
-Displayed fallback label:
+Libellé affiché pour le fallback:
 - `Verrouillage appareil (PIN/Schéma/Mot de passe)`
 
-Why generic:
-- `local_auth` does not provide a reliable PIN vs pattern vs password distinction.
-- biometric listing is often reported as `BiometricType.weak` / `BiometricType.strong`, not always explicit face/fingerprint labels.
+Pourquoi ce libellé est générique:
+- `local_auth` ne fournit pas une distinction fiable entre PIN, schéma et mot de passe.
+- la biométrie est souvent remontée comme `BiometricType.weak` / `BiometricType.strong`, sans type explicite visage/empreinte.
 
-## 4. Runtime Flow
+## 4. Flux d'exécution
 
-### First launch
-1. `SplashScreen` checks `is_first_time_setup`.
-2. If `true`, route to `/first-time-setup`.
-3. User can enable security or skip.
-4. Setup is marked complete in both cases.
+### Premier lancement
+1. `SplashScreen` vérifie `is_first_time_setup`.
+2. Si `true`, redirection vers `/first-time-setup`.
+3. L'utilisateur peut activer la sécurité ou ignorer.
+4. La configuration initiale est marquée comme terminée dans les deux cas.
 
-### Later launches
-1. `SplashScreen` checks `system_auth_enabled`.
-2. If enabled, route to `/system-auth`.
-3. On success, route to `/home`.
+### Lancements suivants
+1. `SplashScreen` vérifie `system_auth_enabled`.
+2. Si activé, redirection vers `/system-auth`.
+3. En cas de succès, redirection vers `/home`.
 
-### Resume lock flow
-`main.dart` arms lock on `inactive/paused/hidden` and enforces `/system-auth` on `resumed` when needed.
+### Reverrouillage au retour de l'arrière-plan
+`main.dart` prépare le verrouillage sur `inactive/paused/hidden` et impose `/system-auth` au `resumed` si nécessaire.
 
-Excluded routes:
+Routes exclues:
 - `/`
 - `/first-time-setup`
 - `/system-auth`
 
-### Security change flow
-`SystemAuthScreen` checks `hasSecurityConfigChanged()`.
-If changed:
-1. disable app auth state
-2. show warning
-3. force route to `/first-time-setup`
+### Changement de configuration de sécurité
+`SystemAuthScreen` vérifie `hasSecurityConfigChanged()`.
+Si changement détecté:
+1. désactivation de l'authentification de l'app
+2. affichage d'un avertissement
+3. redirection forcée vers `/first-time-setup`
 
-## 5. Authentication Engine Details
+## 5. Détails du moteur d'authentification
 
-### local_auth options (current)
-`authenticateWithSystem()` uses:
+### Options `local_auth` (actuelles)
+`authenticateWithSystem()` utilise:
 ```dart
 AuthenticationOptions(
   stickyAuth: false,
@@ -85,93 +85,93 @@ AuthenticationOptions(
 ```
 
 Notes:
-- `stickyAuth: false` avoids OEM loop issues in biometric -> credential transitions.
-- `biometricOnly: false` allows PIN/pattern/password fallback.
+- `stickyAuth: false` évite des boucles OEM lors des transitions biométrie -> identifiants appareil.
+- `biometricOnly: false` autorise le fallback PIN/schéma/mot de passe.
 
-### Fallback strategy
-If `local_auth.authenticate(...)` returns `false` or throws `PlatformException`:
-1. call `stopAuthentication()`
-2. call native fallback via `MethodChannel('atao_quiz/device_credential')`
+### Stratégie de fallback
+Si `local_auth.authenticate(...)` renvoie `false` ou lève `PlatformException`:
+1. appel de `stopAuthentication()`
+2. appel du fallback natif via `MethodChannel('atao_quiz/device_credential')`
 
-Native methods implemented in `MainActivity.kt`:
+Méthodes natives implémentées dans `MainActivity.kt`:
 - `isDeviceCredentialAvailable`
 - `authenticateWithDeviceCredential`
 
-Native behavior:
-- checks `KeyguardManager.isDeviceSecure`
-- starts `createConfirmDeviceCredentialIntent(...)`
-- returns result to Flutter in `onActivityResult` (request code `4242`)
+Comportement natif:
+- vérifie `KeyguardManager.isDeviceSecure`
+- lance `createConfirmDeviceCredentialIntent(...)`
+- renvoie le résultat à Flutter dans `onActivityResult` (code requête `4242`)
 
-This resolves the case where biometric is enrolled but user chooses password/pattern/PIN.
+Cela corrige le cas où la biométrie est enregistrée mais l'utilisateur choisit mot de passe/schéma/PIN.
 
-### Activation behavior
-`enableSystemAuth({ requireCurrentUserVerification = false })` defaults to no immediate user verification to avoid activation failures on some OEM devices.
+### Comportement d'activation
+`enableSystemAuth({ requireCurrentUserVerification = false })` utilise par défaut une activation sans vérification immédiate pour éviter des échecs sur certains appareils OEM.
 
-### Biometrics listing hardening
-`getAvailableLockTypes()` catches exceptions from `getAvailableBiometrics()` so credential fallback still remains available.
+### Robustesse de la détection biométrique
+`getAvailableLockTypes()` intercepte les exceptions de `getAvailableBiometrics()` pour conserver la disponibilité du fallback identifiants appareil.
 
-### Error diagnostics
-The service tracks:
+### Diagnostic des erreurs
+Le service expose:
 - `lastAuthErrorCode`
 - `lastAuthErrorMessage`
 
-`SystemAuthScreen` logs those values for troubleshooting.
+`SystemAuthScreen` journalise ces valeurs pour faciliter le diagnostic.
 
-## 6. SharedPreferences Keys
+## 6. Clés SharedPreferences
 - `is_first_time_setup` (bool)
 - `system_auth_enabled` (bool)
 - `device_lock_types` (List<String>)
 - `last_security_hash` (String)
 
-## 7. Android Configuration (Required)
+## 7. Configuration Android (obligatoire)
 
 ### Permissions
-In `android/app/src/main/AndroidManifest.xml`:
+Dans `android/app/src/main/AndroidManifest.xml`:
 ```xml
 <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 ```
 
-### Backup hardening
-In `android/app/src/main/AndroidManifest.xml`:
+### Durcissement backup
+Dans `android/app/src/main/AndroidManifest.xml`:
 ```xml
 android:allowBackup="false"
 ```
 
-### Activity type
-In `android/app/src/main/kotlin/com/example/atao_quiz/MainActivity.kt`:
+### Type d'activité
+Dans `android/app/src/main/kotlin/com/example/atao_quiz/MainActivity.kt`:
 ```kotlin
 class MainActivity : FlutterFragmentActivity()
 ```
 
-### Theme compatibility
-In both `styles.xml` files, `LaunchTheme` and `NormalTheme` inherit from:
+### Compatibilité thème
+Dans les deux fichiers `styles.xml`, `LaunchTheme` et `NormalTheme` héritent de:
 ```xml
 @style/Theme.AppCompat.DayNight.NoActionBar
 ```
 
 ### Gradle/JVM
-In `android/app/build.gradle.kts`:
-- Java compatibility 11
+Dans `android/app/build.gradle.kts`:
+- compatibilité Java 11
 - Kotlin `jvmTarget = 11`
 - `minSdk = flutter.minSdkVersion`
 - `targetSdk = flutter.targetSdkVersion`
 
-## 8. Known Limitations
-- Exact credential type (PIN vs pattern vs password) is not exposed by `local_auth`.
-- Face unlock may not appear as an explicit selectable type even when available.
+## 8. Limites connues
+- Le type exact d'identifiant (PIN vs schéma vs mot de passe) n'est pas exposé par `local_auth`.
+- La reconnaissance faciale peut ne pas apparaître comme type explicite même si elle est disponible.
 
-## 9. Recommended Validation Checklist
-1. Enable auth during first-time setup
-2. Enable auth later from security management after skip
-3. Disable auth with re-authentication
-4. Re-enable auth after disable
-5. Success with biometric
-6. Success with password/pattern/PIN when biometrics are also configured
-7. Resume lock behavior from background
-8. Security change detection after Android lock modification
-9. Device without biometrics
-10. Device with biometrics + device credential
+## 9. Checklist de validation recommandée
+1. Activation de la sécurité au premier setup
+2. Activation depuis la gestion sécurité après "Ignorer"
+3. Désactivation avec ré-authentification
+4. Réactivation après désactivation
+5. Succès avec biométrie
+6. Succès avec mot de passe/schéma/PIN quand la biométrie est aussi configurée
+7. Reverrouillage après retour de l'arrière-plan
+8. Détection d'un changement de verrou Android
+9. Test sur appareil sans biométrie
+10. Test sur appareil avec biométrie + identifiants appareil
 
-## 10. Last Update
-- February 16, 2026
+## 10. Dernière mise à jour
+- 16 février 2026

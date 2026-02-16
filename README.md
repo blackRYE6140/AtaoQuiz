@@ -1,101 +1,148 @@
-ATAOQUIZ
-“Ataovy lalao ny fianarana, amin’ny AtaoQuiz!”
+# AtaoQuiz
+Ataovy lalao ny fianarana, amin'ny AtaoQuiz.
 
-Transforme l’étude en jeu, avec AtaoQuiz !
+AtaoQuiz est une application mobile Flutter pour apprendre à partir de documents PDF, générer des quiz avec IA et réviser de façon interactive, y compris avec des scénarios hors ligne.
 
+## Sommaire
+1. Vision
+2. État du projet
+3. Fonctionnalités
+4. Architecture du code
+5. Stack technique
+6. Installation et démarrage
+7. Configuration IA (`.env`)
+8. Authentification et sécurité
+9. Scripts utiles
+10. Documentation complémentaire
 
-Présentation Générale
+## 1. Vision
+AtaoQuiz vise à centraliser l'expérience d'apprentissage dans une seule application:
+- lecture de supports PDF
+- génération de quiz assistée par IA
+- entraînement et suivi local
+- accès possible même avec une connectivité limitée
 
-AtaoQuiz est une application mobile d’étude intelligente développée en Flutter, conçue pour aider les étudiants à étudier efficacement, même hors ligne, tout en s’amusant.
-Grâce à l’intelligence artificielle, elle analyse automatiquement les cours en PDF pour générer des quiz, flashcards et résumés.
-Les utilisateurs peuvent ensuite réviser, partager et se défier entre amis, même sans connexion Internet.
+## 2. État du projet
+- Statut: en développement actif
+- Version application: `1.0.0+1`
+- Cible principale actuellement configurée: Android
+- Langue UI principale: français
 
+## 3. Fonctionnalités
 
-Objectif : Rendre l’étude plus simple, interactive et motivante pour les étudiants malgaches.
+### 3.1 Fonctionnalités disponibles
+1. Gestion locale des quiz et des résultats (SharedPreferences)
+2. Import et lecture de documents PDF
+3. Génération de quiz via l'API Gemini
+4. Écran de jeu de quiz (QCM) avec score
+5. Thème clair/sombre
+6. Authentification système Android (biométrie + verrou appareil)
+7. Reverrouillage automatique au retour depuis l'arrière-plan
+8. Détection de changement de configuration de sécurité Android
 
+### 3.2 Fonctionnalités en préparation
+1. Partage local via Wi-Fi direct
+2. Compétition locale entre utilisateurs
+3. Synchronisation cloud (ex: Firebase)
 
-Public Cible
+## 4. Architecture du code
 
-Étudiants du secondaire et de l’université
+### 4.1 Vue d'ensemble
+L'application est organisée autour de trois blocs:
+1. UI (écrans Flutter)
+2. Services métiers (auth, stockage, génération IA)
+3. Configuration plateforme (Android)
 
-Formateurs et enseignants (partage de cours interactifs)
+### 4.2 Structure des dossiers (`lib/`)
+```text
+lib/
+  main.dart
+  components/
+    home_components.dart
+  screens/
+    authentication/
+      first_time_setup_screen.dart
+      system_auth_screen.dart
+      system_auth_manage_screen.dart
+    generatequiz/
+      generate_quiz_screen.dart
+      quiz_list_screen.dart
+      play_quiz_screen.dart
+    pdf/
+      pdf_list_screen.dart
+      pdf_reader_screen.dart
+    home_screen.dart
+    profile_screen.dart
+    settings_screen.dart
+    splash_screen.dart
+  services/
+    gemini_service.dart
+    storage_service.dart
+    system_auth_service.dart
+  theme/
+    colors.dart
+```
 
-Candidats à des examens et concours
+### 4.3 Responsabilités principales
+- `lib/main.dart`: bootstrap app, routes, thème, guard de verrouillage au cycle de vie
+- `lib/services/system_auth_service.dart`: logique d'authentification locale
+- `lib/services/gemini_service.dart`: appel API Gemini pour générer le contenu quiz
+- `lib/services/storage_service.dart`: persistance locale des quiz/résultats
 
-Écoles et centres de formation souhaitant numériser leurs cours
+## 5. Stack technique
+- Flutter / Dart
+- `local_auth` pour l'authentification locale
+- `shared_preferences` pour le stockage local
+- `pdfx` et `flutter_pdfview` pour PDF
+- `http` pour l'appel API Gemini
+- `flutter_dotenv` pour la clé API
 
+## 6. Installation et démarrage
 
-Problématique
+### 6.1 Prérequis
+1. Flutter SDK installé
+2. SDK Android configuré
+3. Un appareil Android ou émulateur
 
-Les étudiants rencontrent aujourd’hui plusieurs obstacles :
+### 6.2 Installation
+```bash
+flutter pub get
+```
 
-Difficulté à lire les PDF sur mobile
+### 6.3 Lancer l'application
+```bash
+flutter run
+```
 
-Manque de motivation pour réviser
+## 7. Configuration IA (`.env`)
+Créer ou compléter le fichier `.env` à la racine:
 
-Absence d’accès Internet fréquent
+```env
+GEMINI_API_KEY=VOTRE_CLE_API
+```
 
-Trop d’outils séparés pour lire, réviser et jouer
+Sans clé valide, la génération IA de quiz ne fonctionnera pas.
 
+## 8. Authentification et sécurité
+Le projet utilise l'authentification système Android.
+Méthodes prises en charge:
+- biométrie
+- verrou appareil (PIN, schéma, mot de passe)
 
-Solution Proposée
+Points importants:
+1. la désactivation de la sécurité dans l'app demande une ré-authentification
+2. la sécurité peut être activée/réactivée depuis l'écran de gestion
+3. la configuration Android doit inclure `FlutterFragmentActivity`, permissions biométriques et thèmes AppCompat
 
-AtaoQuiz regroupe tout dans une seule application :
+## 9. Scripts utiles
+```bash
+flutter analyze
+flutter test
+flutter build apk --debug
+```
 
-Lecture fluide et agréable de cours PDF
+## 10. Documentation complémentaire
+- `AUTH_SYSTEM_DOCUMENTATION.md`
+- `AUTHENTICATION_SYSTEM.md`
 
-IA en ligne qui transforme les leçons en quiz, flashcards et résumés
-
-Mode offline complet : cours et quiz utilisables sans Internet
-
-Partage local via Wi-Fi direct (comme Xender)
-
-Compétition amicale locale : défis, scores, classements
-
-Synchronisation en ligne (Firebase) pour mise à jour et sauvegarde
-
-
-Fonctionnalités Clés
-1. Gestion et Importation de Cours
-
-Importation de fichiers PDF depuis le téléphone
-
-Création de bibliothèques par matière / chapitre
-
-Possibilité d’exporter ses cours vers Firebase ou d’importer ceux d’autres utilisateurs
-
-2. IA de Génération Pédagogique (Online)
-
-Analyse du texte du cours
-
-Création automatique de QCM, flashcards et résumés
-
-Stockage des résultats dans la base locale pour réutilisation offline
-
-3. Lecture Optimisée
-
-Interface confortable (mode sombre, mode livre, sépia)
-
-Ajustement de police, taille, interligne
-
-Lecture sans distraction pour réduire la fatigue visuelle
-
-4. Mode Compétition Locale (Offline)
-
-Fonctionne sans Internet, via socket local Wi-Fi direct
-
-Un utilisateur crée une session (“héberge”)
-
-Les autres rejoignent pour participer au même quiz
-
-Score et classement générés en temps réel
-
-Points cumulés = badges et niveaux débloqués
-
-5. Synchronisation Cloud (Firebase)
-
-Import/export de cours et quiz
-
-Sauvegarde des progrès et des scores
-
-Accès à des cours publics créés par la communauté
+Ces deux documents détaillent l'architecture auth, les flux de sécurité, les limites techniques et les configurations Android requises.

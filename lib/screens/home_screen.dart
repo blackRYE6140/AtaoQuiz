@@ -64,15 +64,15 @@ class HomeScreen extends StatelessWidget {
             ),
             onPressed: () {
               // Dans la navigation vers SettingsScreen
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => SettingsScreen(
-                      onThemeModeChanged: onThemeModeChanged,
-                      currentThemeMode: currentThemeMode,
-                    ),
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => SettingsScreen(
+                    onThemeModeChanged: onThemeModeChanged,
+                    currentThemeMode: currentThemeMode,
                   ),
-                );
+                ),
+              );
             },
           ),
         ],

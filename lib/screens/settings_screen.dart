@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/colors.dart';
-import 'security_setup_dialog.dart';
+import 'authentication/system_auth_manage_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final Function(ThemeMode)? onThemeModeChanged;
@@ -124,15 +124,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _SettingsCard(
               isDark: isDark,
               icon: Icons.security,
-              title: "Configuration de sécurité",
+              title: "Gestion de la sécurité",
               onTap: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => SecuritySetupDialog(isDark: isDark),
-                ).then((_) {
-                  // Rafraîchir le widget si nécessaire
-                  setState(() {});
-                });
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const SystemAuthManageScreen(),
+                  ),
+                );
               },
             ),
 

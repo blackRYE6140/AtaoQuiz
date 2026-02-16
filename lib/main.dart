@@ -1,14 +1,17 @@
+import 'package:atao_quiz/screens/authentication/first_time_setup_screen.dart';
+import 'package:atao_quiz/screens/authentication/system_auth_screen.dart';
+import 'package:atao_quiz/screens/authentication/system_auth_manage_screen.dart';
 import 'package:atao_quiz/screens/generatequiz/generate_quiz_screen.dart';
 import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
 import 'package:atao_quiz/screens/home_screen.dart';
-import 'package:atao_quiz/screens/pin_entry_screen.dart';
-import 'package:atao_quiz/screens/biometric_auth_screen.dart';
 import 'package:atao_quiz/services/storage_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/splash_screen.dart';
 import 'theme/colors.dart';
+
+// flutter analyze 2>&1 | grep "error"
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -91,8 +94,9 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> {
       initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),
-        '/pin-entry': (context) => const PinEntryScreen(),
-        '/biometric-entry': (context) => const BiometricAuthScreen(),
+        '/first-time-setup': (context) => const FirstTimeSetupScreen(),
+        '/system-auth': (context) => const SystemAuthScreen(),
+        '/system-auth-manage': (context) => const SystemAuthManageScreen(),
         '/home': (context) => HomeScreen(
           onThemeModeChanged: _setThemeMode,
           currentThemeMode: _themeMode,

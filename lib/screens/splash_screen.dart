@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/colors.dart';
-import '../services/security_config_service.dart';
+import '../services/system_auth_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -15,6 +16,7 @@ class _SplashScreenState extends State<SplashScreen>
   late AnimationController _shadowController;
   late Animation<double> _shadowAnimation;
   Timer? _navigationTimer;
+  final SystemAuthService _authService = SystemAuthService();
 
   @override
   void initState() {
@@ -43,30 +45,36 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _navigateToHome() async {
-    final securityConfig = SecurityConfigService();
-    final securityType = await securityConfig.getSecurityType();
-    final isSecurityEnabled = await securityConfig.isSecurityEnabled();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final isFirstTime = prefs.getBool('is_first_time_setup') ?? true;
 
-    if (mounted) {
-      late String route;
+      if (mounted) {
+        late String route;
 
-      if (isSecurityEnabled) {
-        switch (securityType) {
-          case SecurityType.pin:
-            route = '/pin-entry';
-            break;
-          case SecurityType.biometric:
-            route = '/biometric-entry';
-            break;
-          case SecurityType.none:
+        if (isFirstTime) {
+          // Première fois: afficher l'écran de configuration
+          route = '/first-time-setup';
+          // Marquer comme non-première fois après
+          await prefs.setBool('is_first_time_setup', false);
+        } else {
+          // Vérifier si l'auth système est activée
+          final isSystemAuthEnabled = await _authService.isSystemAuthEnabled();
+
+          if (isSystemAuthEnabled) {
+            route = '/system-auth';
+          } else {
             route = '/home';
-            break;
+          }
         }
-      } else {
-        route = '/home';
-      }
 
-      Navigator.of(context).pushReplacementNamed(route);
+        Navigator.of(context).pushReplacementNamed(route);
+      }
+    } catch (e) {
+      print('Erreur navigation splash: $e');
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
     }
   }
 

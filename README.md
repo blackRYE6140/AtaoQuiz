@@ -39,9 +39,10 @@ AtaoQuiz vise à centraliser l'expérience d'apprentissage dans une seule applic
 6. Authentification système Android (biométrie + verrou appareil)
 7. Reverrouillage automatique au retour depuis l'arrière-plan
 8. Détection de changement de configuration de sécurité Android
+9. Transfert local de quiz entre deux téléphones (QR code ou IP/port)
 
 ### 3.2 Fonctionnalités en préparation
-1. Partage local via Wi-Fi direct
+1. Durcissement sécurité du transfert local (authentification/chiffrement)
 2. Compétition locale entre utilisateurs
 3. Synchronisation cloud (ex: Firebase)
 
@@ -144,5 +145,6 @@ flutter build apk --debug
 ## 10. Documentation complémentaire
 - `AUTH_SYSTEM_DOCUMENTATION.md`
 - `AUTHENTICATION_SYSTEM.md`
+- `README_TRANSFERT_QUIZ.md`
 
-Ces deux documents détaillent l'architecture auth, les flux de sécurité, les limites techniques et les configurations Android requises.
+Ces documents détaillent l'architecture auth, les flux de sécurité, le transfert local de quiz et les configurations Android requises.

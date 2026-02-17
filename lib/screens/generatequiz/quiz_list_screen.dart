@@ -67,6 +67,13 @@ class _QuizListScreenState extends State<QuizListScreen> {
     ).then((_) => _loadQuizzes());
   }
 
+  void _openCreateQuiz() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const GenerateQuizScreen()),
+    ).then((_) => _loadQuizzes());
+  }
+
   BoxDecoration _cardDecoration(bool isDark) {
     return BoxDecoration(
       borderRadius: BorderRadius.circular(12),
@@ -116,17 +123,6 @@ class _QuizListScreenState extends State<QuizListScreen> {
         ),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadQuizzes),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const GenerateQuizScreen(),
-                ),
-              ).then((_) => _loadQuizzes());
-            },
-          ),
         ],
       ),
       body: _isLoading
@@ -160,26 +156,6 @@ class _QuizListScreenState extends State<QuizListScreen> {
                         fontFamily: 'Poppins',
                         color: secondaryTextColor,
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.add),
-                      label: const Text('Créer un quiz'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryColor,
-                        foregroundColor: isDark ? Colors.black : Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const GenerateQuizScreen(),
-                          ),
-                        ).then((_) => _loadQuizzes());
-                      },
                     ),
                   ],
                 ),
@@ -275,6 +251,13 @@ class _QuizListScreenState extends State<QuizListScreen> {
                 );
               },
             ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openCreateQuiz,
+        backgroundColor: primaryColor,
+        foregroundColor: isDark ? Colors.black : Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('Créer un quiz'),
+      ),
     );
   }
 

@@ -66,6 +66,11 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
       return;
     }
 
+    // Sécurité: une question déjà répondue ne peut plus être modifiée.
+    if (_selectedAnswers[_currentQuestionIndex] != null) {
+      return;
+    }
+
     setState(() {
       _selectionLocked = true;
       _selectedAnswers[_currentQuestionIndex] = optionIndex;
@@ -310,18 +315,18 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
           secondaryTextColor: secondaryTextColor,
           showCompletedState: false,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 6),
         Expanded(
           child: SingleChildScrollView(
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final panelWidth = isWide
-                    ? (constraints.maxWidth - 16) / 2
+                    ? (constraints.maxWidth - 6) / 2
                     : constraints.maxWidth;
 
                 return Wrap(
-                  spacing: 16,
-                  runSpacing: 16,
+                  spacing: 6,
+                  runSpacing: 6,
                   children: [
                     SizedBox(
                       width: panelWidth,
@@ -349,7 +354,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 6),
         _buildQuestionNavigator(
           isDark: isDark,
           primaryColor: primaryColor,
@@ -588,7 +593,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
 
     return Container(
       decoration: _panelDecoration(isDark: isDark),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -600,7 +605,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
                   style: TextStyle(
                     fontFamily: 'Poppins',
                     fontWeight: FontWeight.w700,
-                    fontSize: 16,
+                    fontSize: 15,
                     color: textColor,
                   ),
                 ),
@@ -632,6 +637,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
                 'Répondu: $_answeredCount / $_totalQuestions',
                 style: TextStyle(
                   fontFamily: 'Poppins',
+                  fontSize: 12,
                   color: secondaryTextColor,
                 ),
               ),
@@ -641,6 +647,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
                 style: TextStyle(
                   fontFamily: 'Poppins',
                   fontWeight: FontWeight.w600,
+                  fontSize: 12,
                   color: textColor,
                 ),
               ),
@@ -660,12 +667,12 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
   }) {
     return Container(
       decoration: _panelDecoration(isDark: isDark),
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
             decoration: BoxDecoration(
               color: primaryColor.withValues(alpha: isDark ? 0.25 : 0.13),
               borderRadius: BorderRadius.circular(999),
@@ -674,30 +681,21 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
               'Question ${_currentQuestionIndex + 1}',
               style: TextStyle(
                 fontFamily: 'Poppins',
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: textColor,
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           Text(
             question.text,
             style: TextStyle(
               fontFamily: 'Poppins',
-              fontSize: 20,
+              fontSize: 17,
               fontWeight: FontWeight.w600,
               color: textColor,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Choisissez la meilleure réponse ci-dessous.',
-            style: TextStyle(
-              fontFamily: 'Poppins',
-              fontSize: 13,
-              color: secondaryTextColor,
+              height: 1.3,
             ),
           ),
         ],
@@ -716,7 +714,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
 
     return Container(
       decoration: _panelDecoration(isDark: isDark),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -724,25 +722,28 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
             'Réponses',
             style: TextStyle(
               fontFamily: 'Poppins',
-              fontSize: 18,
+              fontSize: 16,
               fontWeight: FontWeight.w700,
               color: textColor,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           ...List.generate(question.options.length, (index) {
             final bool isSelected = selectedIndex == index;
+            final bool isQuestionLocked = selectedIndex != null;
 
             return Padding(
               padding: EdgeInsets.only(
-                bottom: index == question.options.length - 1 ? 0 : 10,
+                bottom: index == question.options.length - 1 ? 0 : 8,
               ),
               child: InkWell(
                 borderRadius: BorderRadius.circular(14),
-                onTap: _selectionLocked ? null : () => _selectAnswer(index),
+                onTap: (_selectionLocked || isQuestionLocked)
+                    ? null
+                    : () => _selectAnswer(index),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(11),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
                     color: isSelected
@@ -787,9 +788,9 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
                           question.options[index],
                           style: TextStyle(
                             fontFamily: 'Poppins',
-                            fontSize: 15,
+                            fontSize: 14,
                             color: textColor,
-                            height: 1.35,
+                            height: 1.3,
                           ),
                         ),
                       ),
@@ -808,71 +809,6 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
               ),
             );
           }),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _currentQuestionIndex == 0
-                      ? null
-                      : () => _goToQuestion(_currentQuestionIndex - 1),
-                  icon: const Icon(Icons.west, size: 18),
-                  label: const Text(
-                    'Précédente',
-                    style: TextStyle(fontFamily: 'Poppins', fontSize: 12),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: textColor,
-                    side: BorderSide(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.28)
-                          : Colors.black.withValues(alpha: 0.15),
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _currentQuestionIndex >= _totalQuestions - 1
-                      ? null
-                      : () => _goToQuestion(_currentQuestionIndex + 1),
-                  icon: const Icon(Icons.east, size: 18),
-                  label: const Text(
-                    'Suivante',
-                    style: TextStyle(fontFamily: 'Poppins', fontSize: 12),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: textColor,
-                    side: BorderSide(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.28)
-                          : Colors.black.withValues(alpha: 0.15),
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _selectionLocked
-                ? 'Validation en cours...'
-                : 'Touchez une option pour répondre.',
-            style: TextStyle(
-              fontFamily: 'Poppins',
-              fontSize: 12,
-              color: secondaryTextColor,
-            ),
-          ),
         ],
       ),
     );
@@ -887,21 +823,22 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
   }) {
     return Container(
       decoration: _panelDecoration(isDark: isDark),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            reviewMode
-                ? 'Correction par numéro de question'
-                : 'Navigation par numéro de question',
-            style: TextStyle(
-              fontFamily: 'Poppins',
-              fontWeight: FontWeight.w600,
-              color: textColor,
+          if (reviewMode)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Correction par numéro de question',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -939,14 +876,14 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
                 }
 
                 return Padding(
-                  padding: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.only(right: 6),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => _onQuestionBadgeTap(index),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 180),
-                      width: 42,
-                      height: 42,
+                      width: 34,
+                      height: 34,
                       decoration: BoxDecoration(
                         color: backgroundColor,
                         borderRadius: BorderRadius.circular(12),
@@ -969,16 +906,15 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            reviewMode
-                ? 'Touchez un numéro pour voir votre réponse et la bonne réponse.'
-                : 'En vert = bonne réponse, en rouge = mauvaise réponse.',
-            style: TextStyle(
-              fontFamily: 'Poppins',
-              fontSize: 12,
-              color: secondaryTextColor,
+          if (reviewMode)
+            Text(
+              'Touchez un numéro pour voir votre réponse et la bonne réponse.',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontSize: 11,
+                color: secondaryTextColor,
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -1146,10 +1082,10 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final bool isWide = constraints.maxWidth >= 980;
+          final bool isWide = constraints.maxWidth >= 920;
           final EdgeInsets screenPadding = EdgeInsets.symmetric(
-            horizontal: isWide ? 24 : 12,
-            vertical: 12,
+            horizontal: isWide ? 10 : 6,
+            vertical: 6,
           );
 
           return Container(

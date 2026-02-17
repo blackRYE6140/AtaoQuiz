@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/error_codes.dart' as auth_error;
 import 'package:local_auth/local_auth.dart';
+import 'package:local_auth_android/local_auth_android.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum DeviceLockType {
@@ -30,6 +31,7 @@ class SystemAuthService {
   static const String _lastSecurityHashKey = 'last_security_hash';
   String? _lastAuthErrorCode;
   String? _lastAuthErrorMessage;
+  bool? _isTranssionOemDevice;
 
   String? get lastAuthErrorCode => _lastAuthErrorCode;
   String? get lastAuthErrorMessage => _lastAuthErrorMessage;
@@ -209,6 +211,13 @@ class SystemAuthService {
         return false;
       }
 
+      final isTranssionOem =
+          defaultTargetPlatform == TargetPlatform.android &&
+          await _isTranssionOem();
+      if (isTranssionOem) {
+        return _authenticateWithTranssionOptimizedFlow(reason: reason);
+      }
+
       final result = await _localAuth.authenticate(
         localizedReason: reason ?? 'Authentifiez-vous pour accéder à AtaoQuiz',
         options: const AuthenticationOptions(
@@ -227,11 +236,8 @@ class SystemAuthService {
               'Authentication returned false (canceled by user or credential rejected).',
         );
 
-        // Ensure no residual prompt is still active before manual fallback.
-        await stopAuthentication();
-
         final fallbackSuccess =
-            await _authenticateWithDeviceCredentialFallback();
+            await _authenticateWithDeviceCredentialFallbackFlow();
         if (fallbackSuccess) {
           _lastAuthErrorCode = null;
           _lastAuthErrorMessage = null;
@@ -245,8 +251,8 @@ class SystemAuthService {
         message: e.message ?? 'PlatformException without message',
       );
 
-      await stopAuthentication();
-      final fallbackSuccess = await _authenticateWithDeviceCredentialFallback();
+      final fallbackSuccess =
+          await _authenticateWithDeviceCredentialFallbackFlow();
       if (fallbackSuccess) {
         _lastAuthErrorCode = null;
         _lastAuthErrorMessage = null;
@@ -265,6 +271,88 @@ class SystemAuthService {
       _setLastAuthError(code: 'unknown_exception', message: e.toString());
       return false;
     }
+  }
+
+  Future<bool> _authenticateWithTranssionOptimizedFlow({String? reason}) async {
+    final localizedReason =
+        reason ?? 'Authentifiez-vous pour accéder à AtaoQuiz';
+    final hasEnrolledBiometric = await _hasEnrolledBiometric();
+
+    if (hasEnrolledBiometric) {
+      try {
+        final biometricResult = await _localAuth.authenticate(
+          localizedReason: localizedReason,
+          authMessages: const <AuthMessages>[
+            AndroidAuthMessages(cancelButton: 'Utiliser le mot de passe'),
+          ],
+          options: const AuthenticationOptions(
+            stickyAuth: false,
+            sensitiveTransaction: true,
+            biometricOnly: true,
+          ),
+        );
+
+        if (biometricResult) {
+          return true;
+        }
+
+        _setLastAuthError(
+          code: 'auth_failed_or_canceled',
+          message:
+              'Authentication returned false (canceled by user or credential rejected).',
+        );
+
+        // User canceled biometric prompt or chose password. On Transsion
+        // devices, keep a single credential prompt by avoiding automatic retry.
+        final fallbackSuccess =
+            await _authenticateWithDeviceCredentialFallbackFlowWithOptions(
+              allowOemRetry: false,
+              initialDelay: const Duration(milliseconds: 500),
+            );
+        if (fallbackSuccess) {
+          _lastAuthErrorCode = null;
+          _lastAuthErrorMessage = null;
+          return true;
+        }
+
+        return false;
+      } on PlatformException catch (e) {
+        _setLastAuthError(
+          code: e.code,
+          message: e.message ?? 'Biometric-only PlatformException.',
+        );
+
+        final fallbackSuccess =
+            await _authenticateWithDeviceCredentialFallbackFlow();
+        if (fallbackSuccess) {
+          _lastAuthErrorCode = null;
+          _lastAuthErrorMessage = null;
+          return true;
+        }
+      } catch (e) {
+        _setLastAuthError(
+          code: 'biometric_only_unknown_exception',
+          message: e.toString(),
+        );
+
+        final fallbackSuccess =
+            await _authenticateWithDeviceCredentialFallbackFlow();
+        if (fallbackSuccess) {
+          _lastAuthErrorCode = null;
+          _lastAuthErrorMessage = null;
+          return true;
+        }
+      }
+    }
+
+    final fallbackSuccess =
+        await _authenticateWithDeviceCredentialFallbackFlow();
+    if (fallbackSuccess) {
+      _lastAuthErrorCode = null;
+      _lastAuthErrorMessage = null;
+      return true;
+    }
+    return false;
   }
 
   /// Arrêter une authentification en cours (utile à la fermeture d'écran)
@@ -368,6 +456,70 @@ class SystemAuthService {
     return input.hashCode.toString();
   }
 
+  Future<bool> _authenticateWithDeviceCredentialFallbackFlow() async {
+    return _authenticateWithDeviceCredentialFallbackFlowInternal(
+      allowOemRetry: true,
+      initialDelay: const Duration(milliseconds: 250),
+    );
+  }
+
+  Future<bool> _authenticateWithDeviceCredentialFallbackFlowInternal({
+    required bool allowOemRetry,
+    required Duration initialDelay,
+  }) async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return false;
+    }
+
+    // Ensure no residual prompt is still active before manual fallback.
+    await stopAuthentication();
+
+    // Some OEMs immediately cancel credential intents launched right after
+    // biometric prompt dismissal. A short delay improves reliability.
+    await Future<void>.delayed(initialDelay);
+
+    final firstAttempt = await _authenticateWithDeviceCredentialFallback();
+    if (firstAttempt) {
+      return true;
+    }
+
+    if (!allowOemRetry) {
+      return false;
+    }
+
+    if (_lastAuthErrorCode != 'device_credential_failed_or_canceled') {
+      return false;
+    }
+
+    final shouldRetry = await _shouldRetryDeviceCredentialForOem();
+    if (!shouldRetry) {
+      return false;
+    }
+
+    debugPrint(
+      '[SystemAuthService] Retrying device credential fallback for Transsion OEM...',
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    final retryAttempt = await _authenticateWithDeviceCredentialFallback();
+
+    if (!retryAttempt) {
+      await _logDeviceCredentialDebugInfo();
+    }
+
+    return retryAttempt;
+  }
+
+  Future<bool> _authenticateWithDeviceCredentialFallbackFlowWithOptions({
+    required bool allowOemRetry,
+    required Duration initialDelay,
+  }) async {
+    return _authenticateWithDeviceCredentialFallbackFlowInternal(
+      allowOemRetry: allowOemRetry,
+      initialDelay: initialDelay,
+    );
+  }
+
   Future<bool> _authenticateWithDeviceCredentialFallback() async {
     try {
       final isAvailable =
@@ -408,6 +560,93 @@ class SystemAuthService {
         code: 'device_credential_unknown_exception',
         message: e.toString(),
       );
+      return false;
+    }
+  }
+
+  Future<bool> _shouldRetryDeviceCredentialForOem() async {
+    return _isTranssionOem();
+  }
+
+  Future<bool> _isTranssionOem() async {
+    if (_isTranssionOemDevice != null) {
+      return _isTranssionOemDevice!;
+    }
+
+    final info = await _readDeviceCredentialDebugInfo();
+    if (info == null) {
+      _isTranssionOemDevice = false;
+      return false;
+    }
+
+    final manufacturer = (info['manufacturer']?.toString().toLowerCase() ?? '')
+        .trim();
+    final brand = (info['brand']?.toString().toLowerCase() ?? '').trim();
+
+    final isTranssion =
+        manufacturer.contains('tecno') ||
+        manufacturer.contains('infinix') ||
+        manufacturer.contains('itel') ||
+        manufacturer.contains('transsion') ||
+        brand.contains('tecno') ||
+        brand.contains('infinix') ||
+        brand.contains('itel') ||
+        brand.contains('transsion');
+
+    _isTranssionOemDevice = isTranssion;
+    return isTranssion;
+  }
+
+  Future<bool> _hasEnrolledBiometric() async {
+    try {
+      final canCheckBiometrics = await _localAuth.canCheckBiometrics;
+      if (!canCheckBiometrics) {
+        return false;
+      }
+
+      final biometrics = await _localAuth.getAvailableBiometrics();
+      return biometrics.isNotEmpty;
+    } catch (e) {
+      debugPrint(
+        '[SystemAuthService] _hasEnrolledBiometric failed, fallback to device credential: $e',
+      );
+      return false;
+    }
+  }
+
+  Future<void> _logDeviceCredentialDebugInfo() async {
+    final info = await _readDeviceCredentialDebugInfo();
+    if (info == null) {
+      return;
+    }
+
+    debugPrint(
+      '[SystemAuthService] Device credential debug info: manufacturer=${info['manufacturer']} brand=${info['brand']} model=${info['model']} sdk=${info['sdkInt']} isDeviceSecure=${info['isDeviceSecure']}',
+    );
+  }
+
+  Future<Map<String, dynamic>?> _readDeviceCredentialDebugInfo() async {
+    try {
+      return await _deviceCredentialChannel.invokeMapMethod<String, dynamic>(
+        'getDeviceAuthDebugInfo',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> consumeScreenOffFlag() async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return false;
+    }
+
+    try {
+      return await _deviceCredentialChannel.invokeMethod<bool>(
+            'consumeScreenOffFlag',
+          ) ??
+          false;
+    } catch (e) {
+      debugPrint('[SystemAuthService] consumeScreenOffFlag error: $e');
       return false;
     }
   }

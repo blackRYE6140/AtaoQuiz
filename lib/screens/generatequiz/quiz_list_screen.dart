@@ -53,7 +53,7 @@ class _QuizListScreenState extends State<QuizListScreen> {
         ],
       ),
     );
-    
+
     if (confirmed == true) {
       await _storageService.deleteQuiz(quizId);
       await _loadQuizzes();
@@ -63,28 +63,59 @@ class _QuizListScreenState extends State<QuizListScreen> {
   void _playQuiz(Quiz quiz) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => PlayQuizScreen(quiz: quiz),
-      ),
+      MaterialPageRoute(builder: (context) => PlayQuizScreen(quiz: quiz)),
     ).then((_) => _loadQuizzes());
+  }
+
+  BoxDecoration _cardDecoration(bool isDark) {
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(12),
+      color: isDark ? AppColors.darkCard : AppColors.lightCard,
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.06),
+          blurRadius: 8,
+          offset: const Offset(0, 3),
+        ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+    final primaryColor = isDark
+        ? AppColors.accentYellow
+        : AppColors.primaryBlue;
+    final textColor = isDark ? AppColors.darkText : AppColors.lightText;
+    final secondaryTextColor = isDark
+        ? AppColors.darkTextSecondary
+        : AppColors.lightTextSecondary;
+
     return Scaffold(
+      backgroundColor: isDark
+          ? AppColors.darkBackground
+          : AppColors.lightBackground,
       appBar: AppBar(
-        title: const Text('Mes Quizzs'),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: Colors.transparent,
+        centerTitle: true,
+        iconTheme: IconThemeData(color: primaryColor),
+        title: Text(
+          'Mes Quiz',
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            fontWeight: FontWeight.w600,
+            color: primaryColor,
+          ),
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadQuizzes,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadQuizzes),
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
@@ -99,142 +130,151 @@ class _QuizListScreenState extends State<QuizListScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(child: CircularProgressIndicator(color: primaryColor))
           : _quizzes.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.quiz,
-                        size: 80,
-                        color: isDark ? Colors.grey.shade600 : Colors.grey.shade400,
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.quiz,
+                      size: 80,
+                      color: primaryColor.withValues(alpha: 0.55),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Aucun quiz généré',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
                       ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Aucun quiz généré',
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: isDark ? Colors.white70 : Colors.grey.shade600,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Générez votre premier quiz !',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        color: secondaryTextColor,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Créer un quiz'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryColor,
+                        foregroundColor: isDark ? Colors.black : Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Générez votre premier quiz !',
-                        style: TextStyle(
-                          color: isDark ? Colors.white60 : Colors.grey.shade500,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.add),
-                        label: const Text('Créer un quiz'),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const GenerateQuizScreen(),
-                            ),
-                          ).then((_) => _loadQuizzes());
-                        },
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _quizzes.length,
-                  itemBuilder: (context, index) {
-                    final quiz = _quizzes[index];
-                    return Card(
-                      elevation: 2,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: _getDifficultyColor(quiz.difficulty),
-                          child: Text(
-                            'Q',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.black : Colors.black,
-                            ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const GenerateQuizScreen(),
                           ),
-                        ),
-                        title: Text(
-                          quiz.title,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white : Colors.black,
-                          ),
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Text(
-                              '${quiz.questionCount} questions • ${quiz.difficulty} • ${quiz.pdfFileName}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark ? Colors.white60 : Colors.grey.shade600,
-                              ),
-                            ),
-                            if (quiz.score != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 4),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.score,
-                                      size: 14,
-                                      color: quiz.score! >= quiz.questionCount * 0.7
-                                          ? Colors.green
-                                          : quiz.score! >= quiz.questionCount * 0.5
-                                              ? Colors.orange
-                                              : Colors.red,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Score: ${quiz.score}/${quiz.questionCount}',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                        color: quiz.score! >= quiz.questionCount * 0.7
-                                            ? Colors.green
-                                            : quiz.score! >= quiz.questionCount * 0.5
-                                                ? Colors.orange
-                                                : Colors.red,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (quiz.score == null)
-                              IconButton(
-                                icon: Icon(
-                                  Icons.play_arrow,
-                                  color: AppColors.primaryBlue,
-                                ),
-                                onPressed: () => _playQuiz(quiz),
-                              ),
-                            IconButton(
-                              icon: Icon(
-                                Icons.delete_outline,
-                                color: isDark ? Colors.white60 : Colors.grey.shade600,
-                              ),
-                              onPressed: () => _deleteQuiz(quiz.id),
-                            ),
-                          ],
-                        ),
-                        onTap: () => _playQuiz(quiz),
-                      ),
-                    );
-                  },
+                        ).then((_) => _loadQuizzes());
+                      },
+                    ),
+                  ],
                 ),
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _quizzes.length,
+              itemBuilder: (context, index) {
+                final quiz = _quizzes[index];
+                final scoreColor = quiz.score == null
+                    ? secondaryTextColor
+                    : quiz.score! >= quiz.questionCount * 0.7
+                    ? Colors.green
+                    : quiz.score! >= quiz.questionCount * 0.5
+                    ? Colors.orange
+                    : Colors.red;
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: _cardDecoration(isDark),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: _getDifficultyColor(quiz.difficulty),
+                      child: const Text(
+                        'Q',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      quiz.title,
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                      ),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 4),
+                        Text(
+                          '${quiz.questionCount} questions • ${quiz.difficulty} • ${quiz.pdfFileName}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: secondaryTextColor,
+                          ),
+                        ),
+                        if (quiz.score != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              children: [
+                                Icon(Icons.score, size: 14, color: scoreColor),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Score: ${quiz.score}/${quiz.questionCount}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: scoreColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (quiz.score == null)
+                          IconButton(
+                            icon: Icon(Icons.play_arrow, color: primaryColor),
+                            onPressed: () => _playQuiz(quiz),
+                          ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.delete_outline,
+                            color: primaryColor.withValues(alpha: 0.75),
+                          ),
+                          onPressed: () => _deleteQuiz(quiz.id),
+                        ),
+                      ],
+                    ),
+                    onTap: () => _playQuiz(quiz),
+                  ),
+                );
+              },
+            ),
     );
   }
 

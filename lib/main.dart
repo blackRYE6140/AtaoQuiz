@@ -71,7 +71,6 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final _AppRouteObserver _routeObserver = _AppRouteObserver();
   final SystemAuthService _authService = SystemAuthService();
-  bool _lockOnNextResume = false;
   bool _isNavigatingToLockScreen = false;
 
   @override
@@ -89,15 +88,6 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.hidden) {
-      _lockOnNextResume = !_isExcludedFromResumeLock(
-        _routeObserver.currentRouteName,
-      );
-      return;
-    }
-
     if (state == AppLifecycleState.resumed) {
       _lockAppOnResumeIfNeeded();
     }
@@ -114,11 +104,9 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> with WidgetsBindingObserver {
   }
 
   Future<void> _lockAppOnResumeIfNeeded() async {
-    if (!_lockOnNextResume || _isNavigatingToLockScreen) {
+    if (_isNavigatingToLockScreen) {
       return;
     }
-
-    _lockOnNextResume = false;
 
     final routeAtResume = _routeObserver.currentRouteName;
     if (_isExcludedFromResumeLock(routeAtResume)) {
@@ -132,6 +120,11 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> with WidgetsBindingObserver {
 
     final currentRouteName = _routeObserver.currentRouteName;
     if (_isExcludedFromResumeLock(currentRouteName)) {
+      return;
+    }
+
+    final shouldLockFromScreenOff = await _authService.consumeScreenOffFlag();
+    if (!shouldLockFromScreenOff) {
       return;
     }
 

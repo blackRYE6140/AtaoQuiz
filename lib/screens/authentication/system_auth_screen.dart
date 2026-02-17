@@ -125,8 +125,11 @@ class _SystemAuthScreenState extends State<SystemAuthScreen> {
     });
 
     try {
+      final preferredLockType = _lockTypes.contains(DeviceLockType.biometric)
+          ? DeviceLockType.biometric
+          : (_lockTypes.isNotEmpty ? _lockTypes.first : null);
       final reason = _lockTypes.isNotEmpty
-          ? 'Authentifiez-vous avec ${_authService.getLockTypeLabel(_lockTypes.first)}'
+          ? 'Authentifiez-vous avec ${_authService.getLockTypeLabel(preferredLockType!)}'
           : 'Authentifiez-vous pour accéder à AtaoQuiz';
 
       print('[SystemAuth] Starting authentication with reason: $reason');

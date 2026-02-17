@@ -2,7 +2,7 @@
 
 ## 1. Objectif
 AtaoQuiz utilise la sécurité native Android pour contrôler l'accès à l'application.
-L'application ne gère pas de PIN interne. Elle s'appuie sur la méthode de verrouillage déjà configurée sur l'appareil.
+L'application ne gère pas de PIN interne. Elle s'appuie sur le verrouillage déjà configuré sur l'appareil (biométrie, PIN, schéma, mot de passe).
 
 ## 2. Composants principaux
 
@@ -10,11 +10,12 @@ L'application ne gère pas de PIN interne. Elle s'appuie sur la méthode de verr
 - `lib/services/system_auth_service.dart`
 
 Responsabilités:
-- détecter les méthodes de verrouillage disponibles
-- activer/désactiver l'authentification de l'application
-- exécuter l'authentification au runtime
-- lancer le fallback natif Android via identifiants appareil
-- détecter les changements de configuration de sécurité Android
+- détecter les méthodes de sécurité disponibles
+- activer/désactiver la sécurité de l'application
+- exécuter l'authentification runtime
+- gérer les adaptations OEM (Tecno/Infinix/Itel/Transsion)
+- lancer le fallback natif Android (PIN/schéma/mot de passe)
+- exposer les erreurs détaillées d'auth
 
 ### Écrans du flux
 - `lib/screens/authentication/first_time_setup_screen.dart`
@@ -22,7 +23,7 @@ Responsabilités:
 - `lib/screens/authentication/system_auth_manage_screen.dart`
 - `lib/screens/splash_screen.dart`
 
-### Verrouillage au cycle de vie
+### Verrouillage cycle de vie
 - `lib/main.dart`
 
 ### Intégration Android native
@@ -35,46 +36,53 @@ Responsabilités:
 ## 3. Méthodes supportées et libellés
 Types détectés:
 - biométrie
-- fallback identifiants appareil
+- verrou appareil générique
 
-Libellé affiché pour le fallback:
+Libellé verrou appareil:
 - `Verrouillage appareil (PIN/Schéma/Mot de passe)`
 
-Pourquoi ce libellé est générique:
-- `local_auth` ne fournit pas une distinction fiable entre PIN, schéma et mot de passe.
-- la biométrie est souvent remontée comme `BiometricType.weak` / `BiometricType.strong`, sans type explicite visage/empreinte.
+Pourquoi ce libellé reste générique:
+- `local_auth` ne fournit pas une distinction fiable PIN vs schéma vs mot de passe
+- Android remonte souvent la biométrie sous forme `weak/strong` sans type explicite visage/empreinte
 
-## 4. Flux d'exécution
+## 4. Flux applicatif
 
 ### Premier lancement
 1. `SplashScreen` vérifie `is_first_time_setup`.
 2. Si `true`, redirection vers `/first-time-setup`.
 3. L'utilisateur peut activer la sécurité ou ignorer.
-4. La configuration initiale est marquée comme terminée dans les deux cas.
+4. Le setup initial est marqué terminé.
 
 ### Lancements suivants
 1. `SplashScreen` vérifie `system_auth_enabled`.
 2. Si activé, redirection vers `/system-auth`.
-3. En cas de succès, redirection vers `/home`.
+3. Succès -> `/home`.
 
-### Reverrouillage au retour de l'arrière-plan
-`main.dart` prépare le verrouillage sur `inactive/paused/hidden` et impose `/system-auth` au `resumed` si nécessaire.
+### Retour en foreground (comportement actuel)
+Le reverrouillage sur `resumed` ne se fait **plus** à chaque `paused/inactive`.
+Il se fait uniquement si l'écran s'est éteint entre-temps.
 
-Routes exclues:
+Concrètement:
+1. `MainActivity` écoute `ACTION_SCREEN_OFF` et pose un flag interne.
+2. `main.dart` appelle `consumeScreenOffFlag()` au `resumed`.
+3. Si flag = `true` et auth activée -> navigation vers `/system-auth`.
+4. Si flag = `false` (retour notifications/Home sans écran éteint) -> pas de demande d'auth.
+
+Routes exclues du lock:
 - `/`
 - `/first-time-setup`
 - `/system-auth`
 
-### Changement de configuration de sécurité
+### Changement de configuration sécurité Android
 `SystemAuthScreen` vérifie `hasSecurityConfigChanged()`.
 Si changement détecté:
-1. désactivation de l'authentification de l'app
+1. désactivation de la sécurité app
 2. affichage d'un avertissement
-3. redirection forcée vers `/first-time-setup`
+3. redirection vers `/first-time-setup`
 
-## 5. Détails du moteur d'authentification
+## 5. Moteur d'authentification
 
-### Options `local_auth` (actuelles)
+### 5.1 Flux standard (hors OEM ciblé)
 `authenticateWithSystem()` utilise:
 ```dart
 AuthenticationOptions(
@@ -84,46 +92,61 @@ AuthenticationOptions(
 )
 ```
 
-Notes:
-- `stickyAuth: false` évite des boucles OEM lors des transitions biométrie -> identifiants appareil.
-- `biometricOnly: false` autorise le fallback PIN/schéma/mot de passe.
+Si `authenticate` retourne `false` ou exception:
+1. `stopAuthentication()`
+2. délai court
+3. fallback natif via channel credential
+4. retry OEM possible selon conditions (voir section fallback)
 
-### Stratégie de fallback
-Si `local_auth.authenticate(...)` renvoie `false` ou lève `PlatformException`:
-1. appel de `stopAuthentication()`
-2. appel du fallback natif via `MethodChannel('atao_quiz/device_credential')`
+### 5.2 Flux optimisé Transsion (Tecno/Infinix/Itel)
+Détection OEM via `manufacturer/brand` renvoyés par natif.
 
-Méthodes natives implémentées dans `MainActivity.kt`:
+Si biométrie enrôlée:
+1. tentative biométrique `biometricOnly: true`
+2. message Android personnalisé avec bouton `Utiliser le mot de passe`
+3. si échec/annulation -> fallback credential natif **sans retry OEM auto** (évite double saisie mot de passe)
+
+Si biométrie non enrôlée:
+- fallback credential natif direct
+
+### 5.3 Fallback credential Android
+Channel: `atao_quiz/device_credential`
+
+Méthodes utilisées:
 - `isDeviceCredentialAvailable`
 - `authenticateWithDeviceCredential`
+- `getDeviceAuthDebugInfo`
+- `consumeScreenOffFlag`
 
-Comportement natif:
+Implémentation native:
 - vérifie `KeyguardManager.isDeviceSecure`
 - lance `createConfirmDeviceCredentialIntent(...)`
-- renvoie le résultat à Flutter dans `onActivityResult` (code requête `4242`)
+- utilise `ActivityResultContracts.StartActivityForResult()`
+- diffère le lancement si l'activité n'est pas encore `resumed`
 
-Cela corrige le cas où la biométrie est enregistrée mais l'utilisateur choisit mot de passe/schéma/PIN.
+Comportement de fiabilisation:
+- tentative 1 après délai (`250ms` par défaut)
+- si échec `device_credential_failed_or_canceled` et OEM éligible: retry après `450ms`
+- dans le flux Transsion biométrique->mot de passe: retry auto désactivé pour éviter la double demande
 
-### Comportement d'activation
-`enableSystemAuth({ requireCurrentUserVerification = false })` utilise par défaut une activation sans vérification immédiate pour éviter des échecs sur certains appareils OEM.
-
-### Robustesse de la détection biométrique
-`getAvailableLockTypes()` intercepte les exceptions de `getAvailableBiometrics()` pour conserver la disponibilité du fallback identifiants appareil.
-
-### Diagnostic des erreurs
+## 6. Diagnostic
 Le service expose:
 - `lastAuthErrorCode`
 - `lastAuthErrorMessage`
 
-`SystemAuthScreen` journalise ces valeurs pour faciliter le diagnostic.
+`SystemAuthScreen` journalise ces valeurs pour diagnostiquer:
+- annulation utilisateur
+- rejet credential
+- erreur plateforme
+- échec fallback credential
 
-## 6. Clés SharedPreferences
+## 7. Données persistées (SharedPreferences)
 - `is_first_time_setup` (bool)
 - `system_auth_enabled` (bool)
 - `device_lock_types` (List<String>)
 - `last_security_hash` (String)
 
-## 7. Configuration Android (obligatoire)
+## 8. Configuration Android requise
 
 ### Permissions
 Dans `android/app/src/main/AndroidManifest.xml`:
@@ -138,40 +161,33 @@ Dans `android/app/src/main/AndroidManifest.xml`:
 android:allowBackup="false"
 ```
 
-### Type d'activité
-Dans `android/app/src/main/kotlin/com/example/atao_quiz/MainActivity.kt`:
-```kotlin
-class MainActivity : FlutterFragmentActivity()
-```
+### Activity
+`MainActivity` doit hériter de `FlutterFragmentActivity`.
 
-### Compatibilité thème
-Dans les deux fichiers `styles.xml`, `LaunchTheme` et `NormalTheme` héritent de:
-```xml
-@style/Theme.AppCompat.DayNight.NoActionBar
-```
+### Thème Android
+`LaunchTheme` et `NormalTheme` doivent rester basés sur AppCompat (`Theme.AppCompat.DayNight.NoActionBar`).
 
-### Gradle/JVM
-Dans `android/app/build.gradle.kts`:
-- compatibilité Java 11
-- Kotlin `jvmTarget = 11`
-- `minSdk = flutter.minSdkVersion`
-- `targetSdk = flutter.targetSdkVersion`
+### Dépendance Flutter
+`pubspec.yaml` inclut:
+- `local_auth`
+- `local_auth_android` (nécessaire pour `AndroidAuthMessages`)
 
-## 8. Limites connues
-- Le type exact d'identifiant (PIN vs schéma vs mot de passe) n'est pas exposé par `local_auth`.
-- La reconnaissance faciale peut ne pas apparaître comme type explicite même si elle est disponible.
+## 9. Limites connues
+- `local_auth` ne distingue pas de manière certaine PIN/schéma/mot de passe.
+- Android peut remonter la biométrie en classes génériques (`weak/strong`).
+- selon certains firmwares OEM, `false` peut représenter soit annulation soit credential refusé.
 
-## 9. Checklist de validation recommandée
+## 10. Checklist de validation recommandée
 1. Activation de la sécurité au premier setup
-2. Activation depuis la gestion sécurité après "Ignorer"
-3. Désactivation avec ré-authentification
-4. Réactivation après désactivation
-5. Succès avec biométrie
-6. Succès avec mot de passe/schéma/PIN quand la biométrie est aussi configurée
-7. Reverrouillage après retour de l'arrière-plan
-8. Détection d'un changement de verrou Android
-9. Test sur appareil sans biométrie
-10. Test sur appareil avec biométrie + identifiants appareil
+2. Activation/désactivation depuis Gestion sécurité
+3. Auth biométrie réussie
+4. Auth mot de passe/PIN/schéma réussie
+5. Test Transsion: bouton `Utiliser le mot de passe` depuis prompt biométrique
+6. Vérifier absence de double demande mot de passe sur Transsion
+7. Retour notifications/Home sans écran éteint -> pas de lock
+8. Écran éteint puis reprise -> lock
+9. Relancement complet application -> lock si sécurité activée
+10. Changement verrou Android -> redirection reconfiguration
 
-## 10. Dernière mise à jour
-- 16 février 2026
+## 11. Dernière mise à jour
+- 17 février 2026

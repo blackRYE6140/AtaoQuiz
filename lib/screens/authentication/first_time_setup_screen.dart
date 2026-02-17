@@ -144,12 +144,16 @@ class _FirstTimeSetupScreenState extends State<FirstTimeSetupScreen> {
                         height: 100,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: Colors.green.withOpacity(0.1),
+                          color: isDark
+                            ? AppColors.accentYellow.withOpacity(0.1)
+                            : AppColors.primaryBlue.withOpacity(0.1),
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.check_circle,
                           size: 60,
-                          color: Colors.green,
+                          color: isDark
+                            ? AppColors.accentYellow
+                            : AppColors.primaryBlue,
                         ),
                       ),
                       const SizedBox(height: 30),

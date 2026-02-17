@@ -180,12 +180,9 @@ class _QuizListScreenState extends State<QuizListScreen> {
                   child: ListTile(
                     leading: CircleAvatar(
                       backgroundColor: _getDifficultyColor(quiz.difficulty),
-                      child: const Text(
-                        'Q',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
-                        ),
+                      child: Icon(
+                        quiz.isTransferred ? Icons.download_done : Icons.quiz,
+                        color: Colors.black,
                       ),
                     ),
                     title: Text(
@@ -201,7 +198,8 @@ class _QuizListScreenState extends State<QuizListScreen> {
                       children: [
                         const SizedBox(height: 4),
                         Text(
-                          '${quiz.questionCount} questions • ${quiz.difficulty} • ${quiz.pdfFileName}',
+                          '${quiz.questionCount} questions • ${quiz.difficulty} • ${quiz.pdfFileName}'
+                          '${quiz.isTransferred ? ' • Reçu via Wi-Fi' : ''}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(

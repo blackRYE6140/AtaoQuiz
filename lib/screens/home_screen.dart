@@ -3,6 +3,7 @@ import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
 import 'package:atao_quiz/screens/pdf/pdf_list_screen.dart';
 import 'package:atao_quiz/screens/profile_screen.dart';
 import 'package:atao_quiz/screens/settings_screen.dart';
+import 'package:atao_quiz/screens/transfer_quiz/transfer_quiz_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:atao_quiz/theme/colors.dart';
 
@@ -136,7 +137,14 @@ class HomeScreen extends StatelessWidget {
               title: "Partage via Wi-Fi",
               subtitle: "Envoyez des cours entre téléphones",
               imagePath: "assets/illustrations/file_transfer.png",
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const TransferQuizScreen(),
+                  ),
+                );
+              },
             ),
 
             const SizedBox(height: 25),

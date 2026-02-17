@@ -1,8 +1,8 @@
-import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
+import 'package:atao_quiz/screens/transfer_quiz/qr_scanner_screen.dart';
 import 'package:atao_quiz/services/quiz_transfer_service.dart';
-import 'package:atao_quiz/services/storage_service.dart';
 import 'package:atao_quiz/theme/colors.dart';
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 class ReceiveQuizScreen extends StatefulWidget {
   const ReceiveQuizScreen({super.key});
@@ -12,48 +12,34 @@ class ReceiveQuizScreen extends StatefulWidget {
 }
 
 class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
-  final StorageService _storageService = StorageService();
   final QuizTransferService _transferService = QuizTransferService();
   final TextEditingController _hostController = TextEditingController();
   final TextEditingController _portController = TextEditingController(
     text: '${QuizTransferService.defaultPort}',
   );
 
-  bool _isReceiving = false;
-  String _status =
-      'Entrez l\'IP du téléphone émetteur puis appuyez sur Recevoir.';
-  String? _error;
-  List<Quiz> _transferredQuizzes = [];
+  bool _isBusy = false;
 
   @override
   void initState() {
     super.initState();
-    _loadTransferredQuizzes();
+    _transferService.addListener(_onTransferStateChanged);
+    _transferService.initialize();
   }
 
   @override
   void dispose() {
+    _transferService.removeListener(_onTransferStateChanged);
     _hostController.dispose();
     _portController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadTransferredQuizzes() async {
-    final quizzes = await _storageService.getQuizzes();
-    final transferred = quizzes.where((quiz) => quiz.isTransferred).toList()
-      ..sort((a, b) {
-        final aDate = a.receivedAt ?? a.createdAt;
-        final bDate = b.receivedAt ?? b.createdAt;
-        return bDate.compareTo(aDate);
-      });
-
+  void _onTransferStateChanged() {
     if (!mounted) {
       return;
     }
-
-    setState(() {
-      _transferredQuizzes = transferred;
-    });
+    setState(() {});
   }
 
   int? _validatedPort() {
@@ -64,12 +50,52 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
     return parsed;
   }
 
-  Future<void> _receiveQuiz() async {
+  Future<void> _startHosting() async {
+    final port = _validatedPort();
+    if (port == null) {
+      _showMessage('Port invalide.', isError: true);
+      return;
+    }
+
+    setState(() => _isBusy = true);
+    try {
+      await _transferService.startHosting(port: port);
+      if (!mounted) {
+        return;
+      }
+      _showMessage('Serveur lancé sur le port $port.');
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage('Impossible de démarrer le serveur: $e', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isBusy = false);
+      }
+    }
+  }
+
+  Future<void> _stopHosting() async {
+    setState(() => _isBusy = true);
+    try {
+      await _transferService.stopHosting(keepConnection: false);
+      if (!mounted) {
+        return;
+      }
+      _showMessage('Serveur arrêté.');
+    } finally {
+      if (mounted) {
+        setState(() => _isBusy = false);
+      }
+    }
+  }
+
+  Future<void> _connectManually() async {
     final host = _hostController.text.trim();
     final port = _validatedPort();
-
     if (host.isEmpty) {
-      _showMessage('Veuillez saisir une adresse IP.', isError: true);
+      _showMessage('Entrez une adresse IP.', isError: true);
       return;
     }
     if (port == null) {
@@ -77,81 +103,71 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
       return;
     }
 
-    setState(() {
-      _isReceiving = true;
-      _error = null;
-      _status = 'Connexion à $host:$port...';
-    });
-
+    setState(() => _isBusy = true);
     try {
-      final receivedQuiz = await _transferService.receiveQuiz(
-        host: host,
-        port: port,
-      );
-      final preparedQuiz = await _prepareReceivedQuiz(receivedQuiz);
-      await _storageService.saveQuiz(preparedQuiz);
-      await _loadTransferredQuizzes();
-
+      await _transferService.connectToPeer(host: host, port: port);
       if (!mounted) {
         return;
       }
-
-      setState(() {
-        _isReceiving = false;
-        _status = 'Quiz reçu: ${preparedQuiz.title}';
-      });
-      _showMessage('Quiz importé avec succès.');
+      _showMessage('Connecté à $host:$port');
     } catch (e) {
       if (!mounted) {
         return;
       }
-      setState(() {
-        _isReceiving = false;
-        _error = 'Erreur de réception: $e';
-        _status = 'La réception a échoué.';
-      });
-      _showMessage('Échec de la réception: $e', isError: true);
+      _showMessage('Connexion impossible: $e', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isBusy = false);
+      }
     }
   }
 
-  Future<Quiz> _prepareReceivedQuiz(Quiz incomingQuiz) async {
-    final existingQuizzes = await _storageService.getQuizzes();
-    final existingIds = existingQuizzes.map((quiz) => quiz.id).toSet();
-
-    var newId = incomingQuiz.id;
-    var newTitle = incomingQuiz.title;
-    if (existingIds.contains(newId)) {
-      newId = '${incomingQuiz.id}_${DateTime.now().millisecondsSinceEpoch}';
-      newTitle = '${incomingQuiz.title} (copie)';
-    }
-
-    final copiedQuestions = incomingQuiz.questions
-        .map(
-          (question) => Question(
-            text: question.text,
-            options: List<String>.from(question.options),
-            correctIndex: question.correctIndex,
-          ),
-        )
-        .toList();
-
-    return incomingQuiz.copyWith(
-      id: newId,
-      title: newTitle,
-      questions: copiedQuestions,
-      questionCount: copiedQuestions.length,
-      origin: 'transfer',
-      receivedAt: DateTime.now(),
-      clearScore: true,
-      clearPlayedAt: true,
-    );
-  }
-
-  void _openQuizList() {
-    Navigator.push(
+  Future<void> _scanQrAndConnect() async {
+    final payload = await Navigator.push<String>(
       context,
-      MaterialPageRoute(builder: (context) => const QuizListScreen()),
-    ).then((_) => _loadTransferredQuizzes());
+      MaterialPageRoute(builder: (_) => const QrScannerScreen()),
+    );
+    if (payload == null || payload.trim().isEmpty) {
+      return;
+    }
+
+    final target = _transferService.parseTransferPayload(payload);
+    if (target == null) {
+      _showMessage('QR code invalide.', isError: true);
+      return;
+    }
+
+    _hostController.text = target.host;
+    _portController.text = '${target.port}';
+    await _connectManually();
+  }
+
+  Future<void> _reconnect() async {
+    setState(() => _isBusy = true);
+    try {
+      await _transferService.reconnectLastPeer();
+      if (!mounted) {
+        return;
+      }
+      _showMessage('Reconnexion réussie.');
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage('Reconnexion impossible: $e', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isBusy = false);
+      }
+    }
+  }
+
+  Future<void> _disconnect() async {
+    setState(() => _isBusy = true);
+    await _transferService.disconnect();
+    if (mounted) {
+      setState(() => _isBusy = false);
+    }
   }
 
   void _showMessage(String message, {bool isError = false}) {
@@ -179,15 +195,6 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
     );
   }
 
-  String _formatDate(DateTime dateTime) {
-    final d = dateTime.day.toString().padLeft(2, '0');
-    final m = dateTime.month.toString().padLeft(2, '0');
-    final y = dateTime.year.toString();
-    final h = dateTime.hour.toString().padLeft(2, '0');
-    final min = dateTime.minute.toString().padLeft(2, '0');
-    return '$d/$m/$y $h:$min';
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -198,6 +205,9 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
     final secondaryTextColor = isDark
         ? AppColors.darkTextSecondary
         : AppColors.lightTextSecondary;
+    final qrPayload = _transferService.buildQrPayload();
+
+    final canAct = !_isBusy && !_transferService.isSendingBatch;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -209,7 +219,159 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Recevoir un quiz',
+                'État de session',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(
+                    _transferService.isConnected
+                        ? Icons.check_circle
+                        : _transferService.isHosting
+                        ? Icons.wifi_tethering
+                        : Icons.portable_wifi_off,
+                    color: _transferService.isConnected
+                        ? AppColors.success
+                        : primaryColor,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _transferService.statusMessage,
+                      style: TextStyle(color: textColor),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Une fois connectés, les deux téléphones peuvent envoyer et recevoir.',
+                style: TextStyle(color: secondaryTextColor, fontSize: 12),
+              ),
+              if (_transferService.connectedPeer != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Pair: ${_transferService.connectedPeer}',
+                  style: TextStyle(color: secondaryTextColor, fontSize: 12),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: _cardDecoration(isDark),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Port et adresse',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _portController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Port',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _transferService.localIps.isEmpty
+                    ? 'IP locale indisponible.'
+                    : 'IP locale: ${_transferService.localIps.join(' , ')}',
+                style: TextStyle(color: secondaryTextColor, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: _cardDecoration(isDark),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Mode hôte (point de connexion)',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: canAct ? _startHosting : null,
+                      icon: const Icon(Icons.wifi_tethering),
+                      label: const Text('Lancer serveur'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: canAct ? _stopHosting : null,
+                      icon: const Icon(Icons.stop_circle_outlined),
+                      label: const Text('Arrêter'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (qrPayload == null)
+                Text(
+                  'QR indisponible: connectez-vous au réseau Wi-Fi puis relancez.',
+                  style: TextStyle(color: secondaryTextColor, fontSize: 12),
+                )
+              else
+                Center(
+                  child: Column(
+                    children: [
+                      QrImageView(
+                        data: qrPayload,
+                        version: QrVersions.auto,
+                        size: 180,
+                        backgroundColor: Colors.white,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Le second téléphone peut scanner ce QR.',
+                        style: TextStyle(
+                          color: secondaryTextColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: _cardDecoration(isDark),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Mode client (se connecter)',
                 style: TextStyle(
                   fontFamily: 'Poppins',
                   fontWeight: FontWeight.w600,
@@ -220,125 +382,59 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
               TextField(
                 controller: _hostController,
                 decoration: const InputDecoration(
-                  labelText: 'IP du téléphone émetteur',
-                  hintText: 'Ex: 192.168.1.12',
+                  labelText: 'IP hôte',
+                  hintText: 'Ex: 192.168.1.10',
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
               ),
               const SizedBox(height: 10),
-              TextField(
-                controller: _portController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: 'Port socket',
-                  hintText: 'Ex: ${QuizTransferService.defaultPort}',
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _isReceiving ? null : _receiveQuiz,
-                  icon: _isReceiving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.download),
-                  label: Text(_isReceiving ? 'Réception...' : 'Recevoir'),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: _cardDecoration(isDark),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                _isReceiving ? Icons.sync : Icons.info_outline,
-                color: primaryColor,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(_status, style: TextStyle(color: textColor)),
-              ),
-            ],
-          ),
-        ),
-        if (_error != null) ...[
-          const SizedBox(height: 10),
-          Text(_error!, style: const TextStyle(color: AppColors.error)),
-        ],
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Quiz transférés (${_transferredQuizzes.length})',
-                style: TextStyle(
-                  fontFamily: 'Poppins',
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                  color: textColor,
-                ),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: _openQuizList,
-              icon: const Icon(Icons.quiz),
-              label: const Text('Mes Quiz'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (_transferredQuizzes.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: _cardDecoration(isDark),
-            child: Text(
-              'Aucun quiz reçu pour le moment.',
-              style: TextStyle(color: secondaryTextColor),
-            ),
-          )
-        else
-          ..._transferredQuizzes.map((quiz) {
-            final date = quiz.receivedAt ?? quiz.createdAt;
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: _cardDecoration(isDark),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: primaryColor.withValues(alpha: 0.18),
-                  child: Icon(Icons.download_done, color: primaryColor),
-                ),
-                title: Text(
-                  quiz.title,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: canAct ? _scanQrAndConnect : null,
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Scanner QR'),
+                    ),
                   ),
-                ),
-                subtitle: Text(
-                  'Reçu le ${_formatDate(date)}',
-                  style: TextStyle(color: secondaryTextColor, fontSize: 12),
-                ),
-                trailing: Icon(
-                  Icons.arrow_forward_ios,
-                  size: 14,
-                  color: secondaryTextColor,
-                ),
-                onTap: _openQuizList,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: canAct ? _connectManually : null,
+                      icon: const Icon(Icons.link),
+                      label: const Text('Connecter'),
+                    ),
+                  ),
+                ],
               ),
-            );
-          }),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: canAct && _transferService.canReconnect
+                          ? _reconnect
+                          : null,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Reconnecter'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: canAct && _transferService.isConnected
+                          ? _disconnect
+                          : null,
+                      icon: const Icon(Icons.link_off),
+                      label: const Text('Déconnecter'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }

@@ -40,13 +40,13 @@ class TransferQuizScreen extends StatelessWidget {
                 ? AppColors.darkTextSecondary
                 : AppColors.lightTextSecondary,
             tabs: const [
-              Tab(icon: Icon(Icons.send), text: 'Envoyer'),
-              Tab(icon: Icon(Icons.download), text: 'Recevoir'),
+              Tab(icon: Icon(Icons.wifi_tethering), text: 'Connexion'),
+              Tab(icon: Icon(Icons.swap_horiz), text: 'Échanges'),
             ],
           ),
         ),
         body: const TabBarView(
-          children: [SendQuizScreen(), ReceiveQuizScreen()],
+          children: [ReceiveQuizScreen(), SendQuizScreen()],
         ),
       ),
     );

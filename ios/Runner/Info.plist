@@ -47,5 +47,7 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AtaoQuiz utilise le réseau local pour transférer des quiz entre téléphones.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>AtaoQuiz utilise la caméra pour scanner le QR code de connexion.</string>
 </dict>
 </plist>

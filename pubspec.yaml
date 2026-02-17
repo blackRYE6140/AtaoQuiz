@@ -25,6 +25,8 @@ dependencies:
   path: ^1.9.1
   local_auth: ^2.1.0
   local_auth_android: ^1.0.56
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.2.3
 
 dev_dependencies:
   flutter_test:

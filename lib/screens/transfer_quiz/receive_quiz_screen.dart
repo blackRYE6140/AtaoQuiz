@@ -181,10 +181,42 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
     );
   }
 
-  BoxDecoration _cardDecoration(bool isDark) {
+  InputDecoration _inputDecoration({
+    required String labelText,
+    String? hintText,
+    required Color primaryColor,
+  }) {
+    return InputDecoration(
+      labelText: labelText,
+      hintText: hintText,
+      isDense: true,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primaryColor.withValues(alpha: 0.32)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primaryColor.withValues(alpha: 0.32)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primaryColor, width: 1.5),
+      ),
+    );
+  }
+
+  ButtonStyle _outlinedButtonStyle(Color primaryColor) {
+    return OutlinedButton.styleFrom(
+      foregroundColor: primaryColor,
+      side: BorderSide(color: primaryColor.withValues(alpha: 0.35)),
+    );
+  }
+
+  BoxDecoration _cardDecoration(bool isDark, Color primaryColor) {
     return BoxDecoration(
       borderRadius: BorderRadius.circular(12),
       color: isDark ? AppColors.darkCard : AppColors.lightCard,
+      border: Border.all(color: primaryColor.withValues(alpha: 0.32)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.06),
@@ -214,7 +246,7 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
       children: [
         Container(
           padding: const EdgeInsets.all(14),
-          decoration: _cardDecoration(isDark),
+          decoration: _cardDecoration(isDark, primaryColor),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -268,7 +300,7 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
         const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(14),
-          decoration: _cardDecoration(isDark),
+          decoration: _cardDecoration(isDark, primaryColor),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -284,10 +316,9 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
               TextField(
                 controller: _portController,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
+                decoration: _inputDecoration(
                   labelText: 'Port',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+                  primaryColor: primaryColor,
                 ),
               ),
               const SizedBox(height: 10),
@@ -303,7 +334,7 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
         const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(14),
-          decoration: _cardDecoration(isDark),
+          decoration: _cardDecoration(isDark, primaryColor),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -331,6 +362,7 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
                       onPressed: canAct ? _stopHosting : null,
                       icon: const Icon(Icons.stop_circle_outlined),
                       label: const Text('Arrêter'),
+                      style: _outlinedButtonStyle(primaryColor),
                     ),
                   ),
                 ],
@@ -368,7 +400,7 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
         const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(14),
-          decoration: _cardDecoration(isDark),
+          decoration: _cardDecoration(isDark, primaryColor),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -383,11 +415,10 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
               const SizedBox(height: 10),
               TextField(
                 controller: _hostController,
-                decoration: const InputDecoration(
+                decoration: _inputDecoration(
                   labelText: 'IP hôte',
                   hintText: 'Ex: 192.168.1.10',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+                  primaryColor: primaryColor,
                 ),
               ),
               const SizedBox(height: 10),
@@ -406,6 +437,7 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
                       onPressed: canAct ? _connectManually : null,
                       icon: const Icon(Icons.link),
                       label: const Text('Connecter'),
+                      style: _outlinedButtonStyle(primaryColor),
                     ),
                   ),
                 ],
@@ -420,6 +452,7 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
                           : null,
                       icon: const Icon(Icons.refresh),
                       label: const Text('Reconnecter'),
+                      style: _outlinedButtonStyle(primaryColor),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -430,6 +463,7 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
                           : null,
                       icon: const Icon(Icons.link_off),
                       label: const Text('Déconnecter'),
+                      style: _outlinedButtonStyle(primaryColor),
                     ),
                   ),
                 ],

@@ -19,6 +19,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
   final ChallengeService _challengeService = ChallengeService();
   final StorageService _storageService = StorageService();
   final QuizTransferService _transferService = QuizTransferService();
+  static const List<int> _timedDurationsSeconds = [3, 5, 10, 15, 30, 60, 120, 180, 300, 400, 500, 600];
   final TextEditingController _challengeNameController =
       TextEditingController();
   final TextEditingController _localPlayerController = TextEditingController();
@@ -117,11 +118,18 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
       return;
     }
 
+    final choice = await _showChallengeModeDialog();
+    if (choice == null) {
+      return;
+    }
+
     setState(() => _isCreating = true);
     try {
       final session = await _challengeService.createSession(
         quiz: quiz,
         sessionName: _challengeNameController.text.trim(),
+        mode: choice.mode,
+        timeLimitSeconds: choice.timeLimitSeconds,
       );
       _challengeNameController.clear();
 
@@ -129,7 +137,11 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
         return;
       }
 
-      _showMessage('Challenge créé.');
+      _showMessage(
+        choice.mode == ChallengeMode.timed
+            ? 'Challenge chronométré créé.'
+            : 'Défi entre amis créé.',
+      );
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -176,6 +188,266 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
     }
   }
 
+  Future<_ChallengeCreationChoice?> _showChallengeModeDialog() {
+    final parentContext = context;
+    int selectedDuration = 300;
+    String selectedMode = ChallengeMode.friends;
+
+    return showDialog<_ChallengeCreationChoice>(
+      context: context,
+      builder: (dialogContext) {
+        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
+        final primaryColor = isDark
+            ? AppColors.accentYellow
+            : AppColors.primaryBlue;
+        final textColor = isDark ? AppColors.darkText : AppColors.lightText;
+        final secondaryTextColor = isDark
+            ? AppColors.darkTextSecondary
+            : AppColors.lightTextSecondary;
+        final hasConnectedPeer = _transferService.connectedPeersCount > 0;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: isDark
+                  ? AppColors.darkCard
+                  : AppColors.lightCard,
+              title: Text(
+                'Choisir le type de challenge',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              content: SizedBox(
+                width: 440,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildModeCard(
+                        label: 'Défi entre amis',
+                        icon: Icons.groups,
+                        description:
+                            'Mode classique pour jouer et comparer les scores.',
+                        selected: selectedMode == ChallengeMode.friends,
+                        isDark: isDark,
+                        primaryColor: primaryColor,
+                        textColor: textColor,
+                        secondaryTextColor: secondaryTextColor,
+                        onTap: () {
+                          setDialogState(
+                            () => selectedMode = ChallengeMode.friends,
+                          );
+                        },
+                      ),
+                      if (selectedMode == ChallengeMode.friends &&
+                          !hasConnectedPeer) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: primaryColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Aucun autre téléphone connecté pour le moment.',
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontSize: 12,
+                                  fontFamily: 'Poppins',
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.pop(dialogContext);
+                                  Navigator.pushNamed(
+                                    parentContext,
+                                    '/transfer-quiz',
+                                  );
+                                },
+                                icon: const Icon(Icons.wifi_tethering),
+                                label: const Text('Configurer via Wi-Fi'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: primaryColor,
+                                  side: BorderSide(
+                                    color: primaryColor.withValues(alpha: 0.35),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      _buildModeCard(
+                        label: 'Challenge avec le temps',
+                        icon: Icons.timer_outlined,
+                        description:
+                            'Le quiz se termine automatiquement à la fin du chrono.',
+                        selected: selectedMode == ChallengeMode.timed,
+                        isDark: isDark,
+                        primaryColor: primaryColor,
+                        textColor: textColor,
+                        secondaryTextColor: secondaryTextColor,
+                        onTap: () {
+                          setDialogState(
+                            () => selectedMode = ChallengeMode.timed,
+                          );
+                        },
+                      ),
+                      if (selectedMode == ChallengeMode.timed) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Durée du défi',
+                          style: TextStyle(
+                            color: textColor,
+                            fontFamily: 'Poppins',
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _timedDurationsSeconds.map((seconds) {
+                            return ChoiceChip(
+                              label: Text(_formatDurationFromSeconds(seconds)),
+                              selected: selectedDuration == seconds,
+                              onSelected: (_) {
+                                setDialogState(
+                                  () => selectedDuration = seconds,
+                                );
+                              },
+                              selectedColor: primaryColor.withValues(
+                                alpha: 0.22,
+                              ),
+                              side: BorderSide(
+                                color: primaryColor.withValues(alpha: 0.35),
+                              ),
+                              labelStyle: TextStyle(
+                                color: textColor,
+                                fontFamily: 'Poppins',
+                                fontWeight: selectedDuration == seconds
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text('Annuler', style: TextStyle(color: primaryColor)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(
+                      dialogContext,
+                      _ChallengeCreationChoice(
+                        mode: selectedMode,
+                        timeLimitSeconds: selectedMode == ChallengeMode.timed
+                            ? selectedDuration
+                            : null,
+                      ),
+                    );
+                  },
+                  child: const Text('Continuer'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildModeCard({
+    required String label,
+    required IconData icon,
+    required String description,
+    required bool selected,
+    required bool isDark,
+    required Color primaryColor,
+    required Color textColor,
+    required Color secondaryTextColor,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: selected
+                ? primaryColor.withValues(alpha: isDark ? 0.2 : 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? primaryColor
+                  : primaryColor.withValues(alpha: 0.28),
+              width: selected ? 1.4 : 1,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: primaryColor),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: textColor,
+                        fontFamily: 'Poppins',
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: TextStyle(
+                        color: secondaryTextColor,
+                        fontFamily: 'Poppins',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                color: selected ? primaryColor : secondaryTextColor,
+                size: 18,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openSession(ChallengeSession session) async {
     await Navigator.push(
       context,
@@ -206,10 +478,44 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
     return '$day/$month/$year $hour:$minute';
   }
 
-  BoxDecoration _cardDecoration(bool isDark) {
+  String _formatDurationFromSeconds(int seconds) {
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    if (remainingSeconds == 0) {
+      return '$minutes min';
+    }
+    return '${minutes}m ${remainingSeconds}s';
+  }
+
+  InputDecoration _inputDecoration({
+    required String labelText,
+    String? hintText,
+    required Color primaryColor,
+  }) {
+    return InputDecoration(
+      labelText: labelText,
+      hintText: hintText,
+      isDense: true,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primaryColor.withValues(alpha: 0.32)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primaryColor.withValues(alpha: 0.32)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primaryColor, width: 1.5),
+      ),
+    );
+  }
+
+  BoxDecoration _cardDecoration(bool isDark, Color primaryColor) {
     return BoxDecoration(
       borderRadius: BorderRadius.circular(12),
       color: isDark ? AppColors.darkCard : AppColors.lightCard,
+      border: Border.all(color: primaryColor.withValues(alpha: 0.32)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.06),
@@ -243,7 +549,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: _cardDecoration(isDark),
+            decoration: _cardDecoration(isDark, primaryColor),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -259,10 +565,9 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                 TextField(
                   controller: _localPlayerController,
                   textInputAction: TextInputAction.done,
-                  decoration: const InputDecoration(
+                  decoration: _inputDecoration(
                     labelText: 'Nom joueur local',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                    primaryColor: primaryColor,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -286,7 +591,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: _cardDecoration(isDark),
+            decoration: _cardDecoration(isDark, primaryColor),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -319,7 +624,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: _cardDecoration(isDark),
+            decoration: _cardDecoration(isDark, primaryColor),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -341,10 +646,9 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                   DropdownButtonFormField<String>(
                     key: ValueKey(_selectedQuiz?.id),
                     initialValue: _selectedQuiz?.id,
-                    decoration: const InputDecoration(
+                    decoration: _inputDecoration(
                       labelText: 'Quiz à utiliser',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                      primaryColor: primaryColor,
                     ),
                     items: _quizzes
                         .map(
@@ -376,11 +680,10 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                 const SizedBox(height: 10),
                 TextField(
                   controller: _challengeNameController,
-                  decoration: const InputDecoration(
+                  decoration: _inputDecoration(
                     labelText: 'Nom challenge (optionnel)',
                     hintText: 'Ex: Défi maths de la semaine',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                    primaryColor: primaryColor,
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -417,7 +720,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
           if (_sessions.isEmpty)
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: _cardDecoration(isDark),
+              decoration: _cardDecoration(isDark, primaryColor),
               child: Text(
                 'Aucun challenge pour le moment.',
                 style: TextStyle(color: secondaryTextColor),
@@ -429,6 +732,9 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
               final leader = ranked.isNotEmpty ? ranked.first : null;
               final participants = ranked.length;
               final isNetwork = session.networkSessionId != null;
+              final modeLabel = session.isTimed
+                  ? 'Chrono ${_formatDurationFromSeconds(session.timeLimitSeconds!)}'
+                  : 'Défi entre amis';
               final isLiveNetwork =
                   isNetwork &&
                   _transferService.getLiveChallengeByNetworkId(
@@ -438,11 +744,14 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
-                decoration: _cardDecoration(isDark),
+                decoration: _cardDecoration(isDark, primaryColor),
                 child: ListTile(
                   leading: CircleAvatar(
                     backgroundColor: primaryColor.withValues(alpha: 0.18),
-                    child: Icon(Icons.flag, color: primaryColor),
+                    child: Icon(
+                      session.isTimed ? Icons.timer_outlined : Icons.flag,
+                      color: primaryColor,
+                    ),
                   ),
                   title: Text(
                     session.name,
@@ -453,6 +762,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                   ),
                   subtitle: Text(
                     '${isNetwork ? 'Réseau Wi-Fi${isLiveNetwork ? ' (actif)' : ''}' : 'Local'} • '
+                    '$modeLabel\n'
                     '${session.quizTitle} (${session.questionCount} questions)\n'
                     '${leader == null ? 'Aucun score' : 'Leader: ${leader.participantName} (${leader.score}/${leader.totalQuestions})'} • '
                     '$participants participant(s)\n'
@@ -473,4 +783,14 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
       ),
     );
   }
+}
+
+class _ChallengeCreationChoice {
+  final String mode;
+  final int? timeLimitSeconds;
+
+  const _ChallengeCreationChoice({
+    required this.mode,
+    required this.timeLimitSeconds,
+  });
 }

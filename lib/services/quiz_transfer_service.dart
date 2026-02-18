@@ -91,6 +91,8 @@ class LiveChallengeSessionState {
   final String name;
   final String quizTitle;
   final int questionCount;
+  final String mode;
+  final int? timeLimitSeconds;
   final String? localSessionId;
   final String? localQuizId;
   final DateTime startedAt;
@@ -102,6 +104,8 @@ class LiveChallengeSessionState {
     required this.name,
     required this.quizTitle,
     required this.questionCount,
+    required this.mode,
+    required this.timeLimitSeconds,
     required this.localSessionId,
     required this.localQuizId,
     required this.startedAt,
@@ -114,6 +118,8 @@ class LiveChallengeSessionState {
     String? name,
     String? quizTitle,
     int? questionCount,
+    String? mode,
+    int? timeLimitSeconds,
     String? localSessionId,
     String? localQuizId,
     DateTime? startedAt,
@@ -125,6 +131,8 @@ class LiveChallengeSessionState {
       name: name ?? this.name,
       quizTitle: quizTitle ?? this.quizTitle,
       questionCount: questionCount ?? this.questionCount,
+      mode: mode ?? this.mode,
+      timeLimitSeconds: timeLimitSeconds ?? this.timeLimitSeconds,
       localSessionId: localSessionId ?? this.localSessionId,
       localQuizId: localQuizId ?? this.localQuizId,
       startedAt: startedAt ?? this.startedAt,
@@ -502,6 +510,8 @@ class QuizTransferService extends ChangeNotifier {
       name: session.name,
       quizTitle: session.quizTitle,
       questionCount: session.questionCount,
+      mode: session.mode,
+      timeLimitSeconds: session.timeLimitSeconds,
       localSessionId: session.id,
       localQuizId: quiz.id,
       startedAt: startedAt,
@@ -516,6 +526,8 @@ class QuizTransferService extends ChangeNotifier {
       'sessionName': session.name,
       'quizTitle': session.quizTitle,
       'questionCount': session.questionCount,
+      'mode': session.mode,
+      'timeLimitSeconds': session.timeLimitSeconds,
       'hostPlayerName': hostPlayerName.trim(),
       'startedAt': startedAt.toIso8601String(),
       'quiz': cleanQuiz.toJson(),
@@ -814,6 +826,8 @@ class QuizTransferService extends ChangeNotifier {
     final networkSessionId = envelope['networkSessionId']?.toString() ?? '';
     final sessionName =
         envelope['sessionName']?.toString() ?? 'Challenge réseau';
+    final mode = envelope['mode']?.toString() ?? ChallengeMode.friends;
+    final timeLimitSeconds = int.tryParse('${envelope['timeLimitSeconds']}');
     final quizRaw = envelope['quiz'];
     if (networkSessionId.isEmpty || quizRaw is! Map<String, dynamic>) {
       _appendHistory(
@@ -834,6 +848,8 @@ class QuizTransferService extends ChangeNotifier {
         networkSessionId: networkSessionId,
         quiz: preparedQuiz,
         sessionName: sessionName,
+        mode: mode,
+        timeLimitSeconds: timeLimitSeconds,
       );
 
       final startedAt =
@@ -845,6 +861,8 @@ class QuizTransferService extends ChangeNotifier {
         name: session.name,
         quizTitle: session.quizTitle,
         questionCount: session.questionCount,
+        mode: session.mode,
+        timeLimitSeconds: session.timeLimitSeconds,
         localSessionId: session.id,
         localQuizId: preparedQuiz.id,
         startedAt: startedAt,
@@ -956,6 +974,13 @@ class QuizTransferService extends ChangeNotifier {
           int.tryParse('${envelope['questionCount']}') ??
           existing?.questionCount ??
           0,
+      mode:
+          envelope['mode']?.toString() ??
+          existing?.mode ??
+          ChallengeMode.friends,
+      timeLimitSeconds:
+          int.tryParse('${envelope['timeLimitSeconds']}') ??
+          existing?.timeLimitSeconds,
       localSessionId: existing?.localSessionId,
       localQuizId: existing?.localQuizId,
       startedAt: startedAt,
@@ -1076,6 +1101,8 @@ class QuizTransferService extends ChangeNotifier {
       name: existing?.name ?? 'Challenge réseau',
       quizTitle: existing?.quizTitle ?? 'Quiz',
       questionCount: existing?.questionCount ?? incoming.totalQuestions,
+      mode: existing?.mode ?? ChallengeMode.friends,
+      timeLimitSeconds: existing?.timeLimitSeconds,
       localSessionId: existing?.localSessionId,
       localQuizId: existing?.localQuizId,
       startedAt: existing?.startedAt ?? DateTime.now(),
@@ -1199,6 +1226,8 @@ class QuizTransferService extends ChangeNotifier {
       'sessionName': state.name,
       'quizTitle': state.quizTitle,
       'questionCount': state.questionCount,
+      'mode': state.mode,
+      'timeLimitSeconds': state.timeLimitSeconds,
       'startedAt': state.startedAt.toIso8601String(),
       'results': sorted.map((item) => item.toJson()).toList(),
     });
@@ -1243,6 +1272,8 @@ class QuizTransferService extends ChangeNotifier {
       'sessionName': active.name,
       'quizTitle': active.quizTitle,
       'questionCount': active.questionCount,
+      'mode': active.mode,
+      'timeLimitSeconds': active.timeLimitSeconds,
       'hostPlayerName': 'Hôte',
       'startedAt': active.startedAt.toIso8601String(),
       'quiz': cleanQuiz.toJson(),
@@ -1259,6 +1290,8 @@ class QuizTransferService extends ChangeNotifier {
       'sessionName': active.name,
       'quizTitle': active.quizTitle,
       'questionCount': active.questionCount,
+      'mode': active.mode,
+      'timeLimitSeconds': active.timeLimitSeconds,
       'startedAt': active.startedAt.toIso8601String(),
       'results': sorted.map((item) => item.toJson()).toList(),
     });

@@ -3,6 +3,11 @@ import 'dart:convert';
 import 'package:atao_quiz/services/storage_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+class ChallengeMode {
+  static const String friends = 'friends';
+  static const String timed = 'timed';
+}
+
 class ChallengeAttempt {
   final String id;
   final String participantName;
@@ -76,6 +81,8 @@ class ChallengeSession {
   final String quizId;
   final String quizTitle;
   final int questionCount;
+  final String mode;
+  final int? timeLimitSeconds;
   final String? networkSessionId;
   final DateTime createdAt;
   final List<ChallengeAttempt> attempts;
@@ -86,10 +93,15 @@ class ChallengeSession {
     required this.quizId,
     required this.quizTitle,
     required this.questionCount,
+    required this.mode,
+    this.timeLimitSeconds,
     this.networkSessionId,
     required this.createdAt,
     required this.attempts,
   });
+
+  bool get isTimed =>
+      mode == ChallengeMode.timed && (timeLimitSeconds ?? 0) > 0;
 
   Map<String, dynamic> toJson() {
     return {
@@ -98,6 +110,8 @@ class ChallengeSession {
       'quizId': quizId,
       'quizTitle': quizTitle,
       'questionCount': questionCount,
+      'mode': mode,
+      'timeLimitSeconds': timeLimitSeconds,
       'networkSessionId': networkSessionId,
       'createdAt': createdAt.toIso8601String(),
       'attempts': attempts.map((entry) => entry.toJson()).toList(),
@@ -119,12 +133,24 @@ class ChallengeSession {
       }
     }
 
+    final parsedTimeLimit = _normalizeTimeLimitSeconds(
+      int.tryParse('${json['timeLimitSeconds']}'),
+    );
+    final normalizedMode = _normalizeChallengeMode(
+      json['mode']?.toString(),
+      timeLimitSeconds: parsedTimeLimit,
+    );
+
     return ChallengeSession(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? 'Challenge',
       quizId: json['quizId']?.toString() ?? '',
       quizTitle: json['quizTitle']?.toString() ?? 'Quiz',
       questionCount: int.tryParse('${json['questionCount']}') ?? 0,
+      mode: normalizedMode,
+      timeLimitSeconds: normalizedMode == ChallengeMode.timed
+          ? parsedTimeLimit
+          : null,
       networkSessionId: json['networkSessionId']?.toString(),
       createdAt:
           DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
@@ -139,16 +165,30 @@ class ChallengeSession {
     String? quizId,
     String? quizTitle,
     int? questionCount,
+    String? mode,
+    int? timeLimitSeconds,
     String? networkSessionId,
     DateTime? createdAt,
     List<ChallengeAttempt>? attempts,
   }) {
+    final normalizedTimeLimit = timeLimitSeconds == null
+        ? this.timeLimitSeconds
+        : _normalizeTimeLimitSeconds(timeLimitSeconds);
+    final normalizedMode = _normalizeChallengeMode(
+      mode ?? this.mode,
+      timeLimitSeconds: normalizedTimeLimit,
+    );
+
     return ChallengeSession(
       id: id ?? this.id,
       name: name ?? this.name,
       quizId: quizId ?? this.quizId,
       quizTitle: quizTitle ?? this.quizTitle,
       questionCount: questionCount ?? this.questionCount,
+      mode: normalizedMode,
+      timeLimitSeconds: normalizedMode == ChallengeMode.timed
+          ? normalizedTimeLimit
+          : null,
       networkSessionId: networkSessionId ?? this.networkSessionId,
       createdAt: createdAt ?? this.createdAt,
       attempts: attempts ?? this.attempts,
@@ -164,7 +204,9 @@ class LeaderboardEntry {
   final int pointsIntoLevel;
   final int pointsForNextLevel;
   final int challengeWins;
+  final int timedChallengeWins;
   final int challengesPlayed;
+  final int timedChallengesPlayed;
   final int practiceRuns;
   final double averageSuccessRate;
   final int? averageCompletionDurationMs;
@@ -177,7 +219,9 @@ class LeaderboardEntry {
     required this.pointsIntoLevel,
     required this.pointsForNextLevel,
     required this.challengeWins,
+    required this.timedChallengeWins,
     required this.challengesPlayed,
+    required this.timedChallengesPlayed,
     required this.practiceRuns,
     required this.averageSuccessRate,
     required this.averageCompletionDurationMs,
@@ -255,10 +299,22 @@ class ChallengeService {
     required Quiz quiz,
     String? sessionName,
     String? networkSessionId,
+    String mode = ChallengeMode.friends,
+    int? timeLimitSeconds,
   }) async {
     final sessions = await getSessions();
     final now = DateTime.now();
     final cleanName = sessionName?.trim() ?? '';
+    final normalizedTimeLimit = _normalizeTimeLimitSeconds(timeLimitSeconds);
+    final normalizedMode = _normalizeChallengeMode(
+      mode,
+      timeLimitSeconds: normalizedTimeLimit,
+    );
+    if (normalizedMode == ChallengeMode.timed && normalizedTimeLimit == null) {
+      throw const FormatException(
+        'La durée du challenge chronométré est invalide.',
+      );
+    }
 
     final session = ChallengeSession(
       id: _createId(),
@@ -266,6 +322,10 @@ class ChallengeService {
       quizId: quiz.id,
       quizTitle: quiz.title,
       questionCount: quiz.questionCount,
+      mode: normalizedMode,
+      timeLimitSeconds: normalizedMode == ChallengeMode.timed
+          ? normalizedTimeLimit
+          : null,
       networkSessionId: networkSessionId,
       createdAt: now,
       attempts: const [],
@@ -292,16 +352,51 @@ class ChallengeService {
     required String networkSessionId,
     required Quiz quiz,
     String? sessionName,
+    String mode = ChallengeMode.friends,
+    int? timeLimitSeconds,
   }) async {
+    final normalizedTimeLimit = _normalizeTimeLimitSeconds(timeLimitSeconds);
+    final normalizedMode = _normalizeChallengeMode(
+      mode,
+      timeLimitSeconds: normalizedTimeLimit,
+    );
+
     final existing = await getSessionByNetworkSessionId(networkSessionId);
     if (existing != null) {
-      return existing;
+      if (existing.mode == normalizedMode &&
+          existing.timeLimitSeconds == normalizedTimeLimit) {
+        return existing;
+      }
+
+      final sessions = await getSessions();
+      final index = sessions.indexWhere((session) => session.id == existing.id);
+      if (index < 0) {
+        return existing;
+      }
+
+      final updated = sessions[index].copyWith(
+        mode: normalizedMode,
+        timeLimitSeconds: normalizedMode == ChallengeMode.timed
+            ? normalizedTimeLimit
+            : null,
+      );
+      sessions[index] = updated;
+      await _saveSessions(sessions);
+      return updated;
+    }
+
+    if (normalizedMode == ChallengeMode.timed && normalizedTimeLimit == null) {
+      throw const FormatException(
+        'La durée du challenge chronométré est invalide.',
+      );
     }
 
     return createSession(
       quiz: quiz,
       sessionName: sessionName,
       networkSessionId: networkSessionId,
+      mode: normalizedMode,
+      timeLimitSeconds: normalizedTimeLimit,
     );
   }
 
@@ -483,12 +578,16 @@ class ChallengeService {
     }
 
     for (final session in sessions) {
+      final isTimedSession = session.isTimed;
       final ranked = rankAttempts(session);
       for (int i = 0; i < ranked.length; i++) {
         final attempt = ranked[i];
         final stats = statsFor(attempt.participantName);
         stats.playerName = attempt.participantName;
         stats.challengesPlayed += 1;
+        if (isTimedSession) {
+          stats.timedChallengesPlayed += 1;
+        }
         stats.successRateSum += attempt.successRate;
         stats.successRateCount += 1;
         if (attempt.completionDurationMs != null &&
@@ -505,9 +604,29 @@ class ChallengeService {
             : i == 2
             ? 10
             : 0;
-        stats.points += basePoints + bonus;
+        int timedBonus = 0;
+        if (isTimedSession) {
+          timedBonus += 15;
+          final limitSeconds = session.timeLimitSeconds;
+          if (limitSeconds != null && limitSeconds > 0) {
+            final limitMs = limitSeconds * 1000;
+            final durationMs = attempt.completionDurationMs ?? limitMs;
+            final clippedDuration = durationMs < 0
+                ? 0
+                : durationMs > limitMs
+                ? limitMs
+                : durationMs;
+            final speedRatio = 1 - (clippedDuration / limitMs);
+            timedBonus += (speedRatio * 10).round();
+          }
+        }
+
+        stats.points += basePoints + bonus + timedBonus;
         if (i == 0) {
           stats.challengeWins += 1;
+          if (isTimedSession) {
+            stats.timedChallengeWins += 1;
+          }
         }
       }
     }
@@ -537,6 +656,12 @@ class ChallengeService {
         if (byWins != 0) {
           return byWins;
         }
+        final byTimedWins = b.timedChallengeWins.compareTo(
+          a.timedChallengeWins,
+        );
+        if (byTimedWins != 0) {
+          return byTimedWins;
+        }
         final byRate = b.averageSuccessRate.compareTo(a.averageSuccessRate);
         if (byRate != 0) {
           return byRate;
@@ -564,7 +689,9 @@ class ChallengeService {
           pointsIntoLevel: level.pointsIntoLevel,
           pointsForNextLevel: level.pointsForNextLevel,
           challengeWins: item.challengeWins,
+          timedChallengeWins: item.timedChallengeWins,
           challengesPlayed: item.challengesPlayed,
+          timedChallengesPlayed: item.timedChallengesPlayed,
           practiceRuns: item.practiceRuns,
           averageSuccessRate: item.averageSuccessRate,
           averageCompletionDurationMs: item.averageCompletionDurationMs,
@@ -676,7 +803,9 @@ class _PlayerStats {
   String playerName;
   int points = 0;
   int challengeWins = 0;
+  int timedChallengeWins = 0;
   int challengesPlayed = 0;
+  int timedChallengesPlayed = 0;
   int practiceRuns = 0;
   double successRateSum = 0;
   int successRateCount = 0;
@@ -710,4 +839,18 @@ class _LevelData {
     required this.pointsIntoLevel,
     required this.pointsForNextLevel,
   });
+}
+
+String _normalizeChallengeMode(String? mode, {int? timeLimitSeconds}) {
+  if (mode == ChallengeMode.timed && (timeLimitSeconds ?? 0) > 0) {
+    return ChallengeMode.timed;
+  }
+  return ChallengeMode.friends;
+}
+
+int? _normalizeTimeLimitSeconds(int? value) {
+  if (value == null || value <= 0) {
+    return null;
+  }
+  return value;
 }

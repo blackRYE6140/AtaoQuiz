@@ -187,10 +187,11 @@ class _SendQuizScreenState extends State<SendQuizScreen> {
     return '$d/$m/$y $h:$min';
   }
 
-  BoxDecoration _cardDecoration(bool isDark) {
+  BoxDecoration _cardDecoration(bool isDark, Color primaryColor) {
     return BoxDecoration(
       borderRadius: BorderRadius.circular(12),
       color: isDark ? AppColors.darkCard : AppColors.lightCard,
+      border: Border.all(color: primaryColor.withValues(alpha: 0.32)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.06),
@@ -231,7 +232,7 @@ class _SendQuizScreenState extends State<SendQuizScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: _cardDecoration(isDark),
+            decoration: _cardDecoration(isDark, primaryColor),
             child: Row(
               children: [
                 Icon(
@@ -278,7 +279,7 @@ class _SendQuizScreenState extends State<SendQuizScreen> {
           if (_quizzes.isEmpty)
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: _cardDecoration(isDark),
+              decoration: _cardDecoration(isDark, primaryColor),
               child: Text(
                 'Aucun quiz disponible.',
                 style: TextStyle(color: secondaryTextColor),
@@ -289,7 +290,7 @@ class _SendQuizScreenState extends State<SendQuizScreen> {
               final selected = _selectedQuizIds.contains(quiz.id);
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
-                decoration: _cardDecoration(isDark),
+                decoration: _cardDecoration(isDark, primaryColor),
                 child: CheckboxListTile(
                   value: selected,
                   onChanged: isBusy
@@ -356,7 +357,7 @@ class _SendQuizScreenState extends State<SendQuizScreen> {
           if (_transferService.history.isEmpty)
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: _cardDecoration(isDark),
+              decoration: _cardDecoration(isDark, primaryColor),
               child: Text(
                 'Aucun transfert pour le moment.',
                 style: TextStyle(color: secondaryTextColor),
@@ -367,7 +368,7 @@ class _SendQuizScreenState extends State<SendQuizScreen> {
               final color = _colorForEntry(entry, isDark);
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
-                decoration: _cardDecoration(isDark),
+                decoration: _cardDecoration(isDark, primaryColor),
                 child: ListTile(
                   leading: CircleAvatar(
                     backgroundColor: color.withValues(alpha: 0.15),

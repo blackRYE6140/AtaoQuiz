@@ -224,6 +224,9 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
         builder: (_) => PlayQuizScreen(
           quiz: quiz,
           persistResult: false,
+          challengeTimeLimit: session.isTimed
+              ? Duration(seconds: session.timeLimitSeconds!)
+              : null,
           onCompleted: (result) {
             saveOperations.add(_saveAttempt(participant, session.id, result));
 
@@ -313,6 +316,15 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
     return '$seconds.${centiseconds.toString().padLeft(2, '0')}s';
   }
 
+  String _formatDurationFromSeconds(int seconds) {
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    if (remainingSeconds == 0) {
+      return '$minutes min';
+    }
+    return '${minutes}m ${remainingSeconds}s';
+  }
+
   Color _rankColor(int rank) {
     if (rank == 1) {
       return const Color(0xFFFFC107);
@@ -326,10 +338,33 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
     return AppColors.info;
   }
 
-  BoxDecoration _cardDecoration(bool isDark) {
+  InputDecoration _inputDecoration({
+    required String labelText,
+    required Color primaryColor,
+  }) {
+    return InputDecoration(
+      labelText: labelText,
+      isDense: true,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primaryColor.withValues(alpha: 0.32)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primaryColor.withValues(alpha: 0.32)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: primaryColor, width: 1.5),
+      ),
+    );
+  }
+
+  BoxDecoration _cardDecoration(bool isDark, Color primaryColor) {
     return BoxDecoration(
       borderRadius: BorderRadius.circular(12),
       color: isDark ? AppColors.darkCard : AppColors.lightCard,
+      border: Border.all(color: primaryColor.withValues(alpha: 0.32)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.06),
@@ -385,6 +420,9 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
         : _transferService.getRankedResultsForNetworkSession(networkSessionId);
     final rankedLocal = _challengeService.rankAttempts(session);
     final useLiveResults = liveResults.isNotEmpty;
+    final modeLabel = session.isTimed
+        ? 'Challenge avec le temps (${_formatDurationFromSeconds(session.timeLimitSeconds ?? 0)})'
+        : 'Défi entre amis';
 
     final canStartNetwork =
         !_isStartingNetwork &&
@@ -392,9 +430,13 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
         _transferService.connectedPeersCount > 0 &&
         networkSessionId == null;
 
-    final playLabel = networkSessionId != null && _transferService.isConnected
+    final playLabelBase =
+        networkSessionId != null && _transferService.isConnected
         ? 'Jouer et publier score réseau'
         : 'Jouer ce challenge';
+    final playLabel = session.isTimed
+        ? '$playLabelBase (${_formatDurationFromSeconds(session.timeLimitSeconds ?? 0)})'
+        : playLabelBase;
 
     return Scaffold(
       backgroundColor: isDark
@@ -436,7 +478,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
           children: [
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: _cardDecoration(isDark),
+              decoration: _cardDecoration(isDark, primaryColor),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -452,6 +494,15 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                   Text(
                     '${session.questionCount} questions • Créé le ${_formatDate(session.createdAt)}',
                     style: TextStyle(color: secondaryTextColor, fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    modeLabel,
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   if (networkSessionId != null) ...[
                     const SizedBox(height: 4),
@@ -482,7 +533,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: _cardDecoration(isDark),
+              decoration: _cardDecoration(isDark, primaryColor),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -535,7 +586,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: _cardDecoration(isDark),
+              decoration: _cardDecoration(isDark, primaryColor),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -551,10 +602,9 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                   TextField(
                     controller: _participantController,
                     textInputAction: TextInputAction.done,
-                    decoration: const InputDecoration(
+                    decoration: _inputDecoration(
                       labelText: 'Nom participant',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                      primaryColor: primaryColor,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -579,6 +629,8 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
             Text(
               useLiveResults
                   ? 'Classement live (départage au temps)'
+                  : session.isTimed
+                  ? 'Classement du challenge (mode chrono)'
                   : 'Classement du challenge',
               style: TextStyle(
                 color: textColor,
@@ -597,7 +649,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
-                  decoration: _cardDecoration(isDark),
+                  decoration: _cardDecoration(isDark, primaryColor),
                   child: ListTile(
                     leading: CircleAvatar(
                       backgroundColor: color.withValues(alpha: 0.18),
@@ -626,7 +678,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
             else if (rankedLocal.isEmpty)
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: _cardDecoration(isDark),
+                decoration: _cardDecoration(isDark, primaryColor),
                 child: Text(
                   'Aucun score enregistré pour ce challenge.',
                   style: TextStyle(color: secondaryTextColor),
@@ -641,7 +693,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
-                  decoration: _cardDecoration(isDark),
+                  decoration: _cardDecoration(isDark, primaryColor),
                   child: ListTile(
                     leading: CircleAvatar(
                       backgroundColor: color.withValues(alpha: 0.18),

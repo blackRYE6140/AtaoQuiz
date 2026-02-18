@@ -45,10 +45,11 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     }
   }
 
-  BoxDecoration _cardDecoration(bool isDark) {
+  BoxDecoration _cardDecoration(bool isDark, Color primaryColor) {
     return BoxDecoration(
       borderRadius: BorderRadius.circular(12),
       color: isDark ? AppColors.darkCard : AppColors.lightCard,
+      border: Border.all(color: primaryColor.withValues(alpha: 0.32)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.06),
@@ -104,7 +105,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           if (localEntry != null)
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: _cardDecoration(isDark),
+              decoration: _cardDecoration(isDark, primaryColor),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -161,6 +162,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   const SizedBox(height: 6),
                   Text(
                     'Total: ${localEntry.points} pts • ${localEntry.challengeWins} victoire(s) challenge'
+                    ' • ${localEntry.timedChallengeWins} victoire(s) chrono'
                     '${localEntry.averageCompletionDurationMs == null ? '' : ' • Vitesse moy.: ${_formatDuration(localEntry.averageCompletionDurationMs!)}'}',
                     style: TextStyle(color: secondaryTextColor, fontSize: 12),
                   ),
@@ -170,7 +172,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           else
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: _cardDecoration(isDark),
+              decoration: _cardDecoration(isDark, primaryColor),
               child: Text(
                 'Aucune progression enregistrée pour le moment.',
                 style: TextStyle(color: secondaryTextColor),
@@ -190,7 +192,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           if (_entries.isEmpty)
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: _cardDecoration(isDark),
+              decoration: _cardDecoration(isDark, primaryColor),
               child: Text(
                 'Aucun joueur classé.',
                 style: TextStyle(color: secondaryTextColor),
@@ -208,7 +210,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
-                decoration: _cardDecoration(isDark),
+                decoration: _cardDecoration(isDark, primaryColor),
                 child: ListTile(
                   leading: CircleAvatar(
                     backgroundColor: rankColor.withValues(alpha: 0.18),
@@ -231,7 +233,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   subtitle: Text(
                     'Lv.${entry.level} • ${entry.points} pts • '
                     '${entry.challengeWins} victoire(s)\n'
-                    'Challenges: ${entry.challengesPlayed} • Entraînements: ${entry.practiceRuns} • '
+                    'Challenges: ${entry.challengesPlayed} • Chrono: ${entry.timedChallengesPlayed} • Entraînements: ${entry.practiceRuns} • '
                     'Réussite moyenne: $percent%'
                     '${entry.averageCompletionDurationMs == null ? '' : ' • Vitesse: ${_formatDuration(entry.averageCompletionDurationMs!)}'}',
                     style: TextStyle(color: secondaryTextColor, fontSize: 12),

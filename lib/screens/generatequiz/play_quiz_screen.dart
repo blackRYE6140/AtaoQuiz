@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:atao_quiz/services/storage_service.dart';
 import 'package:atao_quiz/theme/colors.dart';
 import 'package:flutter/material.dart';
@@ -26,12 +28,14 @@ class QuizPlayResult {
 class PlayQuizScreen extends StatefulWidget {
   final Quiz quiz;
   final bool persistResult;
+  final Duration? challengeTimeLimit;
   final ValueChanged<QuizPlayResult>? onCompleted;
 
   const PlayQuizScreen({
     super.key,
     required this.quiz,
     this.persistResult = true,
+    this.challengeTimeLimit,
     this.onCompleted,
   });
 
@@ -43,6 +47,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
   late final List<Question> _questions;
   late final List<int?> _selectedAnswers;
   late final DateTime _startedAt;
+  Timer? _countdownTimer;
 
   int _currentQuestionIndex = 0;
   bool _quizCompleted = false;
@@ -50,6 +55,8 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
   bool _resultSaved = false;
   bool _isSavingResult = false;
   bool _completionReported = false;
+  bool _completedByTimeout = false;
+  int? _remainingSeconds;
 
   int get _totalQuestions => _questions.length;
 
@@ -90,6 +97,52 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
 
     _selectedAnswers = List<int?>.filled(_questions.length, null);
     _startedAt = DateTime.now();
+    _startChallengeTimerIfNeeded();
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startChallengeTimerIfNeeded() {
+    final limit = widget.challengeTimeLimit;
+    if (limit == null || limit.inSeconds <= 0) {
+      return;
+    }
+
+    _remainingSeconds = limit.inSeconds;
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _quizCompleted) {
+        timer.cancel();
+        return;
+      }
+
+      final current = _remainingSeconds ?? 0;
+      if (current <= 1) {
+        timer.cancel();
+        setState(() => _remainingSeconds = 0);
+        unawaited(_completeQuizByTimeout());
+        return;
+      }
+
+      setState(() => _remainingSeconds = current - 1);
+    });
+  }
+
+  Future<void> _completeQuizByTimeout() async {
+    if (_quizCompleted) {
+      return;
+    }
+
+    setState(() {
+      _quizCompleted = true;
+      _selectionLocked = true;
+      _completedByTimeout = true;
+    });
+    await _saveQuizResult();
+    _notifyCompletionIfNeeded();
   }
 
   Future<void> _selectAnswer(int optionIndex) async {
@@ -115,6 +168,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
     final bool isLastQuestion = _currentQuestionIndex >= _totalQuestions - 1;
 
     if (isLastQuestion) {
+      _countdownTimer?.cancel();
       setState(() {
         _quizCompleted = true;
         _selectionLocked = false;
@@ -162,15 +216,25 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
     }
     _completionReported = true;
     final now = DateTime.now();
-    final durationMs = now.difference(_startedAt).inMilliseconds;
+    final durationMs = _elapsedDurationMs(now);
     widget.onCompleted?.call(
       QuizPlayResult(
         score: _score,
         totalQuestions: _totalQuestions,
-        completionDurationMs: durationMs < 0 ? 0 : durationMs,
+        completionDurationMs: durationMs,
         completedAt: now,
       ),
     );
+  }
+
+  int _elapsedDurationMs(DateTime now) {
+    final elapsed = now.difference(_startedAt).inMilliseconds;
+    final safeElapsed = elapsed < 0 ? 0 : elapsed;
+    final limitMs = widget.challengeTimeLimit?.inMilliseconds;
+    if (limitMs == null || limitMs <= 0) {
+      return safeElapsed;
+    }
+    return safeElapsed > limitMs ? limitMs : safeElapsed;
   }
 
   void _goToQuestion(int index) {
@@ -194,6 +258,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
         builder: (context) => PlayQuizScreen(
           quiz: widget.quiz,
           persistResult: widget.persistResult,
+          challengeTimeLimit: widget.challengeTimeLimit,
           onCompleted: widget.onCompleted,
         ),
       ),
@@ -484,6 +549,18 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
                           color: secondaryTextColor,
                         ),
                       ),
+                      if (_completedByTimeout) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Temps écoulé: le quiz a été terminé automatiquement.',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 12,
+                            color: AppColors.error,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                       const SizedBox(height: 14),
                       Text(
                         'Score final: $_score/$_totalQuestions',
@@ -648,6 +725,11 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
     final double progress = showCompletedState
         ? 1
         : (_currentQuestionIndex + 1) / _totalQuestions;
+    final remainingSeconds = _remainingSeconds;
+    final hasTimeLimit = (widget.challengeTimeLimit?.inSeconds ?? 0) > 0;
+    final timerColor = remainingSeconds != null && remainingSeconds <= 20
+        ? AppColors.error
+        : primaryColor;
 
     return Container(
       decoration: _panelDecoration(isDark: isDark),
@@ -711,9 +793,34 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
               ),
             ],
           ),
+          if (hasTimeLimit) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.timer_outlined, size: 16, color: timerColor),
+                const SizedBox(width: 6),
+                Text(
+                  'Temps restant: ${_formatCountdown(remainingSeconds ?? 0)}',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: timerColor,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  String _formatCountdown(int totalSeconds) {
+    final clamped = totalSeconds < 0 ? 0 : totalSeconds;
+    final minutes = clamped ~/ 60;
+    final seconds = clamped % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
   Widget _buildQuestionPanel({

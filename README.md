@@ -1,61 +1,63 @@
 # AtaoQuiz
 Ataovy lalao ny fianarana, amin'ny AtaoQuiz.
 
-AtaoQuiz est une application mobile Flutter pour apprendre à partir de documents PDF, générer des quiz avec IA et réviser de façon interactive, y compris avec des scénarios hors ligne.
+AtaoQuiz est une application mobile Flutter pour apprendre depuis des PDF, generer des quiz avec IA et suivre la progression locale, y compris en mode reseau local Wi-Fi.
 
 ## Sommaire
 1. Vision
-2. État du projet
-3. Fonctionnalités
+2. Etat du projet
+3. Fonctionnalites
 4. Architecture du code
 5. Stack technique
-6. Installation et démarrage
+6. Installation et demarrage
 7. Configuration IA (`.env`)
-8. Authentification et sécurité
+8. Authentification et securite
 9. Scripts utiles
-10. Documentation complémentaire
+10. Documentation complementaire
 
 ## 1. Vision
-AtaoQuiz vise à centraliser l'expérience d'apprentissage dans une seule application:
+AtaoQuiz centralise l'experience d'apprentissage:
 - lecture de supports PDF
-- génération de quiz assistée par IA
-- entraînement et suivi local
-- accès possible même avec une connectivité limitée
+- generation de quiz assistee par IA
+- entrainement et suivi local
+- scenarios challenge avec ou sans reseau
 
-## 2. État du projet
-- Statut: en développement actif
-- Version application: `1.0.0+1`
-- Cible principale actuellement configurée: Android
-- Langue UI principale: français
+## 2. Etat du projet
+- Statut: developpement actif
+- Version app: `1.0.0+1`
+- Cible principale configuree: Android
+- Langue UI principale: francais
 
-## 3. Fonctionnalités
+## 3. Fonctionnalites
 
-### 3.1 Fonctionnalités disponibles
-1. Gestion locale des quiz et des résultats (SharedPreferences)
-2. Import et lecture de documents PDF
-3. Génération de quiz via l'API Gemini
-4. Écran de jeu de quiz (QCM) avec score
-5. Thème clair/sombre
-6. Authentification système Android (biométrie + verrou appareil)
-7. Reverrouillage automatique au retour depuis l'arrière-plan
-8. Détection de changement de configuration de sécurité Android
-9. Transfert local de quiz entre téléphones (QR code ou IP/port)
-10. Challenges locaux (score puis vitesse de fin pour départager)
-11. Challenges réseau Wi-Fi multi-téléphones (session live + classement en direct)
-12. Classement global avec système de points, victoires et niveaux
+### 3.1 Fonctionnalites disponibles
+1. Gestion locale des quiz/resultats via `SharedPreferences`.
+2. Import et lecture de documents PDF.
+3. Generation de quiz via l'API Gemini.
+4. Ecran de jeu QCM avec score et temps de completion.
+5. Theme clair/sombre avec palette adaptee.
+6. Authentification systeme Android (biometrie + verrou appareil).
+7. Reverrouillage controle au retour en foreground (selon etat ecran OFF).
+8. Detection de changement de configuration de securite Android.
+9. Transfert local de quiz via Wi-Fi (QR code ou IP/port).
+10. Challenge entre amis (mode Wi-Fi): creation/lancement reserves a l'hote.
+11. Challenge avec chrono (mode personnel): fin automatique quand le temps expire.
+12. Demarrage synchronise en reseau avec compte a rebours.
+13. Classement live et global (points, niveaux, victoires, stats).
+14. Profil joueur unique (nom + avatar/photo) synchronise dans home/challenge/classement.
+15. Ecran `Mes Scores` avec historiques separes: quiz, defis amis, defis chrono.
 
-### 3.2 Fonctionnalités en préparation
-1. Durcissement sécurité du transfert local (authentification/chiffrement)
-2. Lobby challenge (état prêt/pas prêt, démarrage synchronisé)
-3. Synchronisation cloud (ex: Firebase)
+### 3.2 Fonctionnalites en preparation
+1. Durcissement securite transfert local (authentification/chiffrement applicatif).
+2. Synchronisation cloud (ex: Firebase).
 
 ## 4. Architecture du code
 
 ### 4.1 Vue d'ensemble
-L'application est organisée autour de trois blocs:
-1. UI (écrans Flutter)
-2. Services métiers (auth, stockage, génération IA)
-3. Configuration plateforme (Android)
+L'application est organisee autour de:
+1. UI Flutter
+2. Services metiers (auth, stockage, profil, challenge, transfert, IA)
+3. Configuration plateforme Android
 
 ### 4.2 Structure des dossiers (`lib/`)
 ```text
@@ -63,6 +65,7 @@ lib/
   main.dart
   components/
     home_components.dart
+    profile_avatar.dart
   screens/
     authentication/
       first_time_setup_screen.dart
@@ -80,6 +83,13 @@ lib/
     pdf/
       pdf_list_screen.dart
       pdf_reader_screen.dart
+    scores/
+      my_scores_screen.dart
+    transfer_quiz/
+      transfer_quiz_screen.dart
+      receive_quiz_screen.dart
+      send_quiz_screen.dart
+      qr_scanner_screen.dart
     home_screen.dart
     profile_screen.dart
     settings_screen.dart
@@ -90,17 +100,19 @@ lib/
     quiz_transfer_service.dart
     storage_service.dart
     system_auth_service.dart
+    user_profile_service.dart
   theme/
     colors.dart
 ```
 
-### 4.3 Responsabilités principales
-- `lib/main.dart`: bootstrap app, routes, thème, guard de verrouillage au cycle de vie
-- `lib/services/system_auth_service.dart`: logique d'authentification locale
-- `lib/services/gemini_service.dart`: appel API Gemini pour générer le contenu quiz
-- `lib/services/storage_service.dart`: persistance locale des quiz/résultats
-- `lib/services/quiz_transfer_service.dart`: transfert Wi-Fi, sockets TCP, challenge live réseau
-- `lib/services/challenge_service.dart`: logique de challenge, points, niveaux, classement
+### 4.3 Responsabilites principales
+- `lib/main.dart`: bootstrap app, routes, themes, comportement global scroll/lock.
+- `lib/services/system_auth_service.dart`: logique auth locale Android.
+- `lib/services/gemini_service.dart`: generation quiz via API Gemini.
+- `lib/services/storage_service.dart`: persistance quiz/resultats locaux.
+- `lib/services/user_profile_service.dart`: profil unique (nom, avatar, photo, etat setup).
+- `lib/services/challenge_service.dart`: sessions challenge, ranking, points/niveaux.
+- `lib/services/quiz_transfer_service.dart`: connexion Wi-Fi, transfert quiz, challenge live.
 
 ## 5. Stack technique
 - Flutter / Dart
@@ -108,15 +120,16 @@ lib/
 - `shared_preferences` pour le stockage local
 - `pdfx` et `flutter_pdfview` pour PDF
 - `http` pour l'appel API Gemini
-- `flutter_dotenv` pour la clé API
-- `qr_flutter` + `mobile_scanner` pour QR et connexion entre appareils
+- `flutter_dotenv` pour la cle API
+- `qr_flutter` + `mobile_scanner` pour QR et connexion inter-appareils
+- `file_picker` pour import d'image profil
 
-## 6. Installation et démarrage
+## 6. Installation et demarrage
 
-### 6.1 Prérequis
-1. Flutter SDK installé
-2. SDK Android configuré
-3. Un appareil Android ou émulateur
+### 6.1 Prerequis
+1. Flutter SDK installe
+2. SDK Android configure
+3. Appareil Android ou emulateur
 
 ### 6.2 Installation
 ```bash
@@ -129,36 +142,38 @@ flutter run
 ```
 
 ## 7. Configuration IA (`.env`)
-Créer ou compléter le fichier `.env` à la racine:
+Creer/mettre a jour `.env` a la racine:
 
 ```env
 GEMINI_API_KEY=VOTRE_CLE_API
 ```
 
-Sans clé valide, la génération IA de quiz ne fonctionnera pas.
+Sans cle valide, la generation IA ne fonctionne pas.
 
-## 8. Authentification et sécurité
-Le projet utilise l'authentification système Android.
-Méthodes prises en charge:
-- biométrie
-- verrou appareil (PIN, schéma, mot de passe)
+## 8. Authentification et securite
+Le projet utilise l'authentification systeme Android.
+
+Methodes prises en charge:
+- biometrie
+- verrou appareil (PIN/schema/mot de passe)
 
 Points importants:
-1. la désactivation de la sécurité dans l'app demande une ré-authentification
-2. la sécurité peut être activée/réactivée depuis l'écran de gestion
-3. la configuration Android doit inclure `FlutterFragmentActivity`, permissions biométriques et thèmes AppCompat
+1. desactivation de la securite app soumise a re-authentification
+2. gestion activation/desactivation depuis l'ecran de gestion
+3. configuration Android requise: `FlutterFragmentActivity`, permissions biometrie, themes AppCompat
 
 ## 9. Scripts utiles
 ```bash
 flutter analyze
 flutter test
 flutter build apk --debug
+flutter build apk --release --split-per-abi
 ```
 
-## 10. Documentation complémentaire
+## 10. Documentation complementaire
 - `AUTH_SYSTEM_DOCUMENTATION.md`
-- `AUTHENTICATION_SYSTEM.md`
-- `README_TRANSFERT_QUIZ.md` (transfert local QR/IP, sockets, Android)
-- `README_CLASSEMENT_CHALLENGE.md` (classement, challenge local/reseau, points et niveaux)
+- `README_TRANSFERT_QUIZ.md`
+- `README_CLASSEMENT_CHALLENGE.md`
+- `README_PROFIL_SCORES.md`
 
-Ces documents détaillent l'architecture auth, les flux de sécurité, le transfert local, le système de classement/challenge et les configurations Android requises.
+Ces documents detaillent les flux techniques de securite, transfert Wi-Fi, challenge/classement, profil et historiques de scores.

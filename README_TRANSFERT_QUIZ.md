@@ -1,34 +1,39 @@
-# Transfert de quiz entre 2 telephones (AtaoQuiz)
+# Transfert de quiz via Wi-Fi (AtaoQuiz)
 
-Ce document explique de facon complete le transfert local de quiz entre deux telephones Android dans AtaoQuiz: methode technique, configuration Android, permissions, utilisation, limites et depannage.
+Ce document couvre le transfert local de quiz et la base reseau utilisee aussi par les challenges live.
 
 ## 1. Objectif
 
-Permettre a deux telephones d'echanger des quiz en local, sans cloud:
-- telephone A heberge la connexion (serveur TCP)
-- telephone B se connecte (client TCP)
-- une fois connectes, les deux peuvent envoyer/recevoir des quiz
+Permettre des echanges locaux sans cloud:
+- un telephone hote lance le serveur TCP
+- un ou plusieurs telephones clients se connectent
+- tous les appareils connectes peuvent envoyer/recevoir des quiz
 
-## 2. Methode utilisee
+Le meme canal sert aussi au mode challenge Wi-Fi.
+
+## 2. Methode technique
 
 ### 2.1 Transport reseau
-- Socket TCP locale via `dart:io` (`ServerSocket` et `Socket`)
-- Port par defaut: `4040` (modifiable dans l'ecran de connexion)
-- Reseau requis: meme LAN (meme Wi-Fi ou hotspot partage)
+- `dart:io` (`ServerSocket`, `Socket`)
+- port par defaut: `4040` (modifiable)
+- appareils sur le meme LAN (meme Wi-Fi/hotspot)
 
-### 2.2 Decouverte du pair
-- Methode 1 (recommandee): QR code
-  - l'hote genere un QR contenant `host` + `port`
-  - le client scanne le QR avec la camera
-- Methode 2: saisie manuelle IP + port
+### 2.2 Connexion
+- QR code (recommande)
+  - l'hote publie `host + port`
+  - le client scanne
+- saisie manuelle IP + port
 
-### 2.3 Format de protocole
-Messages JSON, 1 message par ligne (`\n`), avec enveloppe:
+### 2.3 Protocole
+Messages JSON, une ligne par message (`\n`), enveloppe commune:
 - `protocol`: `atao_quiz.live_transfer`
 - `version`: `2`
-- `type`: `hello`, `quiz`, `ack`
 
-Exemple logique:
+Types principaux:
+- transfert quiz: `hello`, `quiz`, `ack`
+- challenge live: `challenge_start`, `challenge_round_start`, `challenge_result`, `challenge_leaderboard`
+
+Exemple:
 ```json
 {
   "protocol": "atao_quiz.live_transfer",
@@ -40,58 +45,69 @@ Exemple logique:
 }
 ```
 
-## 3. Flux complet entre 2 telephones
+## 3. Flux d'utilisation
 
-### 3.1 Telephone A (hote)
-1. Aller dans `Transfert de quiz` > onglet `Connexion`.
-2. Verifier/choisir le port (par defaut `4040`).
+### 3.1 Hote
+1. Ouvrir `Transfert de quiz` > `Connexion`.
+2. Verifier/choisir le port.
 3. Appuyer sur `Lancer serveur`.
-4. Afficher le QR code.
+4. Afficher le QR.
+5. Les amis scannent pour rejoindre.
 
-### 3.2 Telephone B (client)
-1. Aller dans `Transfert de quiz` > onglet `Connexion`.
-2. Appuyer sur `Scanner QR` (ou saisir IP/port manuellement).
+### 3.2 Client
+1. Ouvrir `Transfert de quiz` > `Connexion`.
+2. Scanner QR (ou IP/port manuel).
 3. Se connecter a l'hote.
 
-### 3.3 Envoi des quiz
-1. Sur l'un des telephones, aller dans l'onglet `Echanges`.
-2. Selectionner un ou plusieurs quiz.
-3. Appuyer sur `Envoyer`.
-4. Le pair recoit et importe les quiz automatiquement.
-5. L'historique affiche succes/erreur pour chaque transfert.
+### 3.3 Echange de quiz
+1. Ouvrir onglet `Echanges`.
+2. Selectionner quiz.
+3. Envoyer.
+4. Import automatique cote recepteur.
+5. Historique de statut affiche.
 
-## 4. Donnees transferees et traitement
+## 4. Regles de traitement des quiz
 
 ### 4.1 Avant envoi
-Le quiz est "nettoye":
-- copie des questions/options
-- remise a zero des champs de score/session (`score`, `playedAt`)
+Quiz nettoye:
+- copie defensive des questions/options
+- reset score/date de jeu
 
 ### 4.2 A la reception
-- validation du protocole/version
-- import via `StorageService` (SharedPreferences)
-- si ID deja existant:
-  - creation d'un nouvel ID
+- validation protocole/version
+- import `StorageService`
+- si ID deja present:
+  - nouvel ID genere
   - suffixe ` (copie)` sur le titre
-- metadonnees appliquees:
+- metadonnees:
   - `origin = "transfer"`
   - `receivedAt = now`
-  - score remis a zero
+  - score reset
 
 ### 4.3 Historique
-- Historique en memoire (temporaire, non persiste)
-- Maximum `120` entrees
-- Suppression possible depuis l'UI
+- en memoire (non persiste)
+- max `120` entrees
+- suppression possible depuis l'UI
 
-## 5. Configuration Android complete
+## 5. Lien avec le challenge Wi-Fi
 
-### 5.1 Dependances Flutter (pubspec)
-Les dependances cle pour le transfert sont:
-- `qr_flutter` (generation du QR)
-- `mobile_scanner` (scan camera du QR)
-- `shared_preferences` (stockage local des quiz recus)
+Le meme service reseau pilote les challenges live:
+- l'hote cree et lance le challenge (`challenge_start`)
+- l'hote annonce une manche synchronisee (`challenge_round_start`)
+- les joueurs envoient leurs scores (`challenge_result`)
+- l'hote renvoie le classement consolide (`challenge_leaderboard`)
 
-### 5.2 Permissions Android (Manifest)
+Regle metier UI:
+- en mode `Defi entre amis`, seul le telephone hote (celui du QR) peut creer/continuer.
+
+## 6. Configuration Android
+
+### 6.1 Dependances Flutter
+- `qr_flutter`
+- `mobile_scanner`
+- `shared_preferences`
+
+### 6.2 Permissions
 Dans `android/app/src/main/AndroidManifest.xml`:
 
 ```xml
@@ -101,67 +117,52 @@ Dans `android/app/src/main/AndroidManifest.xml`:
 <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 ```
 
-Explication:
-- `INTERNET`: indispensable pour sockets TCP locales
-- `CAMERA`: indispensable pour scanner le QR
-- `USE_BIOMETRIC` / `USE_FINGERPRINT`: utilisees par la securite locale de l'app (auth systeme), pas directement par le transfert
+Notes:
+- `INTERNET`: obligatoire pour sockets TCP.
+- `CAMERA`: obligatoire pour scanner QR.
+- permissions biometrie: utilisees par la securite app, pas par le transfert.
 
-### 5.3 Activity Android
-`MainActivity` doit rester compatible plugins (scanner/auth):
-- classe: `FlutterFragmentActivity`
+### 6.3 Activity
+- `MainActivity` doit rester `FlutterFragmentActivity`
 - fichier: `android/app/src/main/kotlin/com/example/atao_quiz/MainActivity.kt`
 
-### 5.4 Build Android (Gradle)
-Dans `android/app/build.gradle.kts`:
-- Java/Kotlin cible 11
-- `minSdk` et `targetSdk` herites de Flutter
+### 6.4 Permission runtime
+- la camera est demandee au premier scan QR.
+- fallback possible par saisie IP/port si refus camera.
 
-### 5.5 Permissions runtime
-- Camera: autorisation demandee au premier scan QR
-- Si l'utilisateur refuse la camera, le scan QR ne fonctionne pas (utiliser IP/port manuel en secours)
+## 7. Conditions de fonctionnement
 
-## 6. Conditions de fonctionnement
+- appareils sur le meme reseau local
+- protocole compatible (`version = 2`) sur tous les appareils
+- l'hote doit avoir une IP locale valide pour afficher le QR
+- le serveur peut gerer plusieurs pairs connectes
 
-- Les 2 telephones doivent etre sur le meme reseau local.
-- Le telephone hote doit rester sur l'ecran de transfert pendant la session.
-- Un seul pair actif a la fois sur le serveur actuel.
-- Les 2 appareils doivent utiliser une version compatible du protocole (`version = 2`).
-
-## 7. Erreurs frequentes et solutions
+## 8. Erreurs frequentes
 
 - `QR indisponible: connectez-vous au reseau Wi-Fi puis relancez`
-  - le telephone n'a pas d'IP locale exploitable
-  - activer Wi-Fi/hotspot puis relancer le serveur
-
+  - pas d'IP locale exploitable
 - `Connexion impossible`
-  - verifier meme reseau, IP correcte, port correct
-  - verifier qu'un serveur est bien lance sur l'hote
-
+  - verifier reseau, IP, port, serveur actif
 - `Protocole incompatible`
-  - versions d'app/protocole differentes
-  - mettre a jour les deux telephones avec une version compatible
-
-- `Nouveau pair refuse: connexion deja active`
-  - le serveur accepte une connexion active a la fois
-  - deconnecter le pair courant avant un nouveau pair
-
+  - mismatch de version app/protocole
 - `Port invalide (1..65535)`
   - saisir un port numerique valide
 
-## 8. Securite (etat actuel)
+## 9. Securite actuelle
 
-Le transfert actuel est local mais non chiffre au niveau applicatif:
-- pas de TLS
-- pas d'authentification forte entre pairs
+Etat:
+- pas de TLS applicatif
+- pas d'authentification forte pair-a-pair
 
-Recommandations:
-- utiliser un reseau de confiance
-- eviter les Wi-Fi publics
-- evolutions conseillees: token de session, chiffrement (TLS), validation explicite du pair
+Conseils:
+- utiliser reseau de confiance
+- eviter Wi-Fi public
+- evolutions possibles: token session, chiffrement, verification explicite pair
 
-## 9. Fichiers source de reference
+## 10. Fichiers de reference
 
 - `lib/services/quiz_transfer_service.dart`
+- `lib/screens/transfer_quiz/transfer_quiz_screen.dart`
 - `lib/screens/transfer_quiz/receive_quiz_screen.dart`
 - `lib/screens/transfer_quiz/send_quiz_screen.dart`
 - `lib/screens/transfer_quiz/qr_scanner_screen.dart`

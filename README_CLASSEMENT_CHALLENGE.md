@@ -1,171 +1,197 @@
 # Classement et Challenge (local + reseau Wi-Fi)
 
-Ce document explique en detail la fonctionnalite `Classement & Challenge` d'AtaoQuiz: architecture, flux utilisateur, regles de classement, points/niveaux, protocole reseau et configuration Android.
+Ce document decrit le fonctionnement reel de `Challenge & Classement` dans AtaoQuiz: modes de jeu, roles hote/joueur, regles de classement, points/niveaux et protocole reseau.
 
 ## 1. Objectif
 
-Permettre de jouer un meme quiz:
-- en local (un telephone, plusieurs joueurs)
-- en reseau local Wi-Fi (2 telephones ou plus)
+Permettre de jouer un quiz:
+- en mode `Defi entre amis` (reseau Wi-Fi, multi-telephones)
+- en mode `Challenge avec le temps` (chrono personnel)
 
 Puis calculer:
-- un classement de session challenge (vainqueur d'une partie)
+- un classement de session
 - un classement global (points, niveau, victoires)
 
 ## 2. Perimetre actuel
 
-- Challenge local: disponible.
-- Challenge reseau multi-telephones: disponible.
-- Departage des ex aequo: score d'abord, puis vitesse de fin.
-- Classement global: disponible avec systeme de points et niveau.
-- Stockage: local (`SharedPreferences`), pas de cloud pour le moment.
+- Session challenge mode amis: disponible.
+- Session challenge mode chrono: disponible.
+- Challenge live Wi-Fi multi-pairs: disponible.
+- Demarrage synchronise avec compte a rebours: disponible.
+- Profil synchronise (nom + image) dans challenge et leaderboard: disponible.
+- Stockage: local (`SharedPreferences`), pas de cloud.
 
-## 3. Hierarchie du code (feature)
+## 3. Architecture feature
 
 ### 3.1 Ecrans
 
 - `lib/screens/challenge/challenge_center_screen.dart`
-  - conteneur principal avec 2 onglets: `Challenges` et `Classement`.
+  - container principal avec 2 onglets: `Challenges` et `Classement`.
 - `lib/screens/challenge/challenge_sessions_screen.dart`
-  - creation des sessions challenge
-  - configuration du nom joueur local
-  - affichage et ouverture de sessions existantes
-  - status Wi-Fi (pairs connectes)
+  - creation session (choix mode amis ou chrono)
+  - guard profil configure (prompt + redirection profil la premiere fois)
+  - guard reseau: en `Defi entre amis`, seul l'hote peut continuer
+  - liste des `Challenges termines`
 - `lib/screens/challenge/challenge_detail_screen.dart`
-  - lancement de partie
-  - lancement d'un challenge reseau
-  - affichage classement local ou live
+  - details session et lancement de partie
+  - bouton `Lancer challenge Wi-Fi` (hote)
+  - demarrage synchronise des manches reseau
+  - classement local ou live (avec avatar joueur)
 - `lib/screens/challenge/leaderboard_screen.dart`
   - classement global (points, niveau, victoires, stats)
+  - prompt setup profil la premiere fois si profil non configure
 
 ### 3.2 Services
 
 - `lib/services/challenge_service.dart`
-  - modeles challenge (session, tentative, leaderboard)
-  - persistance locale
-  - ranking local
-  - calcul points et niveaux
+  - modeles: `ChallengeSession`, `ChallengeAttempt`, `LeaderboardEntry`
+  - persistance locale des sessions
+  - ranking par session
+  - calcul points et niveaux globaux
 - `lib/services/quiz_transfer_service.dart`
-  - socket TCP
-  - connexion QR/IP
-  - orchestration challenge live (`challenge_start`, `challenge_result`, `challenge_leaderboard`)
-  - synchronisation resultats entre appareils
+  - sockets TCP, connexion QR/IP
+  - challenge live: `challenge_start`, `challenge_round_start`, `challenge_result`, `challenge_leaderboard`
+  - synchronisation resultats et avatars entre appareils
+- `lib/services/user_profile_service.dart`
+  - profil joueur unique (nom/avatar/photo)
+  - gestion "prompt setup une seule fois" pour challenge/classement
 - `lib/screens/generatequiz/play_quiz_screen.dart`
-  - retourne `completionDurationMs` a la fin d'un quiz
-  - cette duree est utilisee pour departager les ex aequo
+  - renvoie score + `completionDurationMs`
+  - applique une limite de temps quand un challenge chrono est actif
 
 ## 4. Flux utilisateur
 
-### 4.1 Challenge local (sans reseau)
+### 4.1 Creation d'une session challenge
 
-1. Ouvrir `Classement & Challenge`.
-2. Dans `Challenges`, creer une session en choisissant un quiz.
-3. Ouvrir la session.
-4. Saisir le nom du participant.
-5. Lancer `Jouer ce challenge`.
-6. Le score et le temps sont sauvegardes.
-7. Le classement de la session est mis a jour.
+Depuis `Challenges` -> `Creer et ouvrir`:
+1. Choisir le quiz source.
+2. Choisir le mode:
+   - `Defi entre amis`
+   - `Challenge avec le temps`
+3. Si mode chrono, choisir la duree (ex: 2 min, 5 min, etc.).
 
-### 4.2 Challenge reseau (2+ telephones)
+Regles:
+- `Defi entre amis`: le bouton `Continuer` est actif uniquement si:
+  - le telephone est en mode hote (`serveur Wi-Fi`)
+  - au moins un autre telephone est connecte
+- sinon, popup d'information + redirection possible vers `Partage via Wi-Fi`.
 
-1. Sur le telephone hote:
-   - aller dans `Transfert Wi-Fi`
-   - lancer le serveur
-   - connecter les autres appareils via QR ou IP/port
-2. Sur l'hote, creer ou ouvrir une session challenge.
-3. Dans le detail de la session, appuyer sur `Lancer challenge Wi-Fi`.
-4. Le quiz et la session reseau sont diffuses aux telephones connectes.
-5. Chaque joueur lance le quiz et envoie son resultat.
-6. L'hote calcule le classement live et le rediffuse a tous les appareils.
-7. Les resultats persistent localement pour alimenter le classement global.
+### 4.2 Challenge reseau Wi-Fi (defi entre amis)
 
-## 5. Regles de classement d'une session challenge
+1. Telephone hote:
+   - ouvre `Transfert Wi-Fi`
+   - lance le serveur
+   - partage QR/IP aux amis
+2. Hote cree/ouvre une session mode amis.
+3. Hote appuie `Lancer challenge Wi-Fi`.
+4. Les joueurs rejoins recoivent la session et voient l'etat d'attente.
+5. Hote lance une manche synchronisee:
+   - countdown diffuse a tous
+   - option chrono activable pour cette manche (sinon sans chrono)
+6. Tous les appareils demarrent ensemble au debut du countdown.
+7. Chaque joueur envoie son resultat, l'hote consolide et rediffuse le classement live.
 
-Pour un joueur, seul le meilleur resultat est garde.
+### 4.3 Challenge avec le temps (mode personnel)
 
-Regle de comparaison des tentatives:
+1. L'utilisateur cree une session en mode `Challenge avec le temps`.
+2. Il choisit une duree.
+3. Le quiz s'arrete automatiquement a la fin du chrono.
+4. Le resultat est classe avec les autres tentatives de la session.
+
+## 5. Regles de classement de session
+
+Pour chaque joueur, un seul meilleur resultat est conserve.
+
+Comparaison des tentatives:
 1. score le plus eleve
-2. si meme score: temps de completion le plus court
-3. si toujours egalite: tentative la plus ancienne
+2. puis temps de completion le plus court
+3. puis meilleure reussite
+4. puis tentative la plus ancienne
 
-Tri final d'un classement de session:
-1. score descendant
-2. temps de completion ascendant
-3. date de fin (plus ancien d'abord)
-4. nom joueur (fallback alphabetique pour le live)
+Tri final:
+1. score desc
+2. temps asc
+3. reussite desc
+4. date asc
 
 ## 6. Classement global: points et niveaux
 
-Le leaderboard global est calcule a partir:
-- des meilleurs resultats de chaque joueur dans chaque challenge
-- des resultats d'entrainement local du joueur local
+Sources:
+- meilleurs resultats challenge (amis + chrono)
+- resultats d'entrainement local
 
-Points challenge (par session):
+Points challenge:
 - base: `30 + round(taux_reussite * 70)`
 - bonus podium:
   - rang 1: `+30`
   - rang 2: `+20`
   - rang 3: `+10`
+- bonus chrono session timed:
+  - `+15` fixe
+  - `+0..10` selon rapidite vs limite temps
 
-Points entrainement local:
+Points entrainement:
 - `10 + round(taux_reussite * 40)`
 
-Tri du leaderboard global:
-1. points totaux (desc)
-2. nombre de victoires challenge (desc)
-3. reussite moyenne (desc)
-4. temps moyen (asc, si disponible)
-5. nom joueur (alphabetique)
+Tri leaderboard global:
+1. points desc
+2. victoires challenge desc
+3. victoires chrono desc
+4. reussite moyenne desc
+5. temps moyen asc
+6. nom joueur alpha
 
 Niveaux:
-- seuil initial niveau 1 -> 2: `120` points
-- puis seuil suivant = seuil precedent `* 1.18` (arrondi)
+- seuil initial niv 1 -> 2: `120`
+- seuil suivant: `seuil_precedent * 1.18` (arrondi)
 
-## 7. Protocole reseau challenge
+## 7. Reseau challenge (protocole)
 
 Transport:
-- TCP socket (`dart:io`)
-- protocole applicatif: `atao_quiz.live_transfer`
+- TCP (`dart:io`)
+- protocole: `atao_quiz.live_transfer`
 - version: `2`
 
 Messages principaux:
-- `challenge_start`: demarre une session live et envoie le quiz
-- `challenge_result`: envoi du score individuel d'un joueur
+- `challenge_start`: creation session live + envoi quiz + identite hote
+- `challenge_round_start`: annonce manche synchronisee (countdown + chrono optionnel)
+- `challenge_result`: envoi resultat joueur
 - `challenge_leaderboard`: classement live consolide diffuse par l'hote
 
 Important:
-- l'hote est l'autorite du classement live
-- quand un nouveau pair se connecte en cours de partie, l'hote peut lui renvoyer session + leaderboard courant
+- l'hote est l'autorite de classement live
+- un pair qui rejoint plus tard peut recevoir l'etat actif (session + manche + leaderboard)
 
 ## 8. Persistance locale
 
-`ChallengeService` utilise `SharedPreferences`:
+`ChallengeService` stocke les sessions dans:
 - `challenge_sessions_v1`
-- `challenge_local_player_name_v1`
+
+`UserProfileService` gere le nom/image global, avec migration legacy possible depuis:
+- `challenge_local_player_name_v1` (lecture legacy uniquement)
 
 Chaque `ChallengeSession` stocke:
 - metadonnees session (`id`, `name`, `quizId`, `quizTitle`, `questionCount`)
-- `networkSessionId` si challenge reseau
-- liste des tentatives
+- `mode` (`friends` ou `timed`)
+- `timeLimitSeconds` si mode chrono
+- `networkSessionId` si session reseau
+- tentatives
 
-## 9. Configuration Android et permissions
+## 9. Configuration Android
 
-Le challenge reseau depend de la stack transfert Wi-Fi.
-
-Manifest (`android/app/src/main/AndroidManifest.xml`):
-- `android.permission.INTERNET` (obligatoire sockets TCP)
-- `android.permission.CAMERA` (necessaire uniquement pour scan QR)
+Dans `android/app/src/main/AndroidManifest.xml`:
+- `android.permission.INTERNET` (sockets TCP)
+- `android.permission.CAMERA` (scan QR)
 
 Autres points:
-- les appareils doivent etre sur le meme reseau local
-- `MainActivity` doit rester compatible plugins (scanner/auth), donc `FlutterFragmentActivity`
+- appareils sur le meme reseau local
+- `MainActivity` compatible plugins (`FlutterFragmentActivity`)
 
-## 10. Limites actuelles
+## 10. Limites connues
 
-- Pas de chiffrement TLS applicatif sur les sockets.
-- Pas d'authentification forte entre appareils.
-- Pas encore de lobby "pret/pas pret" avant lancement.
-- Classement global local a l'appareil (pas synchronise cloud).
+- Pas de TLS applicatif sur sockets.
+- Pas d'authentification forte pair-a-pair.
+- Classement global local a l'appareil (pas de sync cloud).
 
 ## 11. Fichiers de reference
 
@@ -175,5 +201,6 @@ Autres points:
 - `lib/screens/challenge/leaderboard_screen.dart`
 - `lib/services/challenge_service.dart`
 - `lib/services/quiz_transfer_service.dart`
+- `lib/services/user_profile_service.dart`
 - `lib/screens/generatequiz/play_quiz_screen.dart`
 - `README_TRANSFERT_QUIZ.md`

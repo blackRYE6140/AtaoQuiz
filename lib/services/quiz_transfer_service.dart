@@ -97,6 +97,7 @@ class LiveChallengeSessionState {
   final String? localQuizId;
   final DateTime startedAt;
   final bool startedLocally;
+  final LiveChallengeRoundPlan? pendingRound;
   final List<LiveChallengePlayerResult> results;
 
   const LiveChallengeSessionState({
@@ -110,6 +111,7 @@ class LiveChallengeSessionState {
     required this.localQuizId,
     required this.startedAt,
     required this.startedLocally,
+    required this.pendingRound,
     required this.results,
   });
 
@@ -124,6 +126,8 @@ class LiveChallengeSessionState {
     String? localQuizId,
     DateTime? startedAt,
     bool? startedLocally,
+    LiveChallengeRoundPlan? pendingRound,
+    bool clearPendingRound = false,
     List<LiveChallengePlayerResult>? results,
   }) {
     return LiveChallengeSessionState(
@@ -137,9 +141,28 @@ class LiveChallengeSessionState {
       localQuizId: localQuizId ?? this.localQuizId,
       startedAt: startedAt ?? this.startedAt,
       startedLocally: startedLocally ?? this.startedLocally,
+      pendingRound: clearPendingRound
+          ? null
+          : pendingRound ?? this.pendingRound,
       results: results ?? this.results,
     );
   }
+}
+
+class LiveChallengeRoundPlan {
+  final String roundId;
+  final DateTime startsAt;
+  final int? timeLimitSeconds;
+  final String startedBy;
+  final DateTime announcedAt;
+
+  const LiveChallengeRoundPlan({
+    required this.roundId,
+    required this.startsAt,
+    required this.timeLimitSeconds,
+    required this.startedBy,
+    required this.announcedAt,
+  });
 }
 
 class QuizTransferService extends ChangeNotifier {
@@ -516,6 +539,7 @@ class QuizTransferService extends ChangeNotifier {
       localQuizId: quiz.id,
       startedAt: startedAt,
       startedLocally: true,
+      pendingRound: null,
       results: _liveChallenges[networkSessionId]?.results ?? const [],
     );
     _activeLiveChallengeId = networkSessionId;
@@ -543,6 +567,67 @@ class QuizTransferService extends ChangeNotifier {
     _statusMessage = 'Challenge réseau actif: ${session.name}';
     notifyListeners();
     return networkSessionId;
+  }
+
+  Future<LiveChallengeRoundPlan> startLiveChallengeRound({
+    required String networkSessionId,
+    required String startedBy,
+    int? roundTimeLimitSeconds,
+    int countdownSeconds = 5,
+  }) async {
+    if (_serverSocket == null) {
+      throw StateError('Seul l\'hôte peut démarrer une partie synchronisée.');
+    }
+    if (!isConnected) {
+      throw StateError('Aucun pair connecté.');
+    }
+    final state = _liveChallenges[networkSessionId];
+    if (state == null) {
+      throw StateError('Challenge réseau introuvable.');
+    }
+
+    final normalizedCountdown = countdownSeconds < 2 ? 2 : countdownSeconds;
+    final normalizedTimeLimit = (roundTimeLimitSeconds ?? 0) > 0
+        ? roundTimeLimitSeconds
+        : null;
+    final now = DateTime.now();
+    final startsAt = now.add(Duration(seconds: normalizedCountdown));
+    final roundPlan = LiveChallengeRoundPlan(
+      roundId: 'round_${_createTransferId()}',
+      startsAt: startsAt,
+      timeLimitSeconds: normalizedTimeLimit,
+      startedBy: startedBy.trim().isEmpty ? 'Hôte' : startedBy.trim(),
+      announcedAt: now,
+    );
+
+    _liveChallenges[networkSessionId] = state.copyWith(pendingRound: roundPlan);
+    _activeLiveChallengeId = networkSessionId;
+
+    await _sendMessageToAll({
+      'type': 'challenge_round_start',
+      'networkSessionId': networkSessionId,
+      'roundId': roundPlan.roundId,
+      'sessionName': state.name,
+      'quizTitle': state.quizTitle,
+      'questionCount': state.questionCount,
+      'mode': state.mode,
+      'timeLimitSeconds': state.timeLimitSeconds,
+      'startedBy': roundPlan.startedBy,
+      'countdownSeconds': normalizedCountdown,
+      'roundTimeLimitSeconds': normalizedTimeLimit,
+      'startsAt': roundPlan.startsAt.toIso8601String(),
+      'announcedAt': roundPlan.announcedAt.toIso8601String(),
+    });
+
+    _appendHistory(
+      direction: TransferDirection.system,
+      status: TransferStatus.info,
+      title: 'Challenge',
+      message:
+          'Départ synchronisé annoncé (${normalizedCountdown}s) pour "${state.name}".',
+    );
+    notifyListeners();
+    return roundPlan;
   }
 
   Future<void> submitLiveChallengeResult({
@@ -595,6 +680,12 @@ class QuizTransferService extends ChangeNotifier {
     String networkSessionId,
   ) {
     return _liveChallenges[networkSessionId];
+  }
+
+  LiveChallengeRoundPlan? getRoundPlanForNetworkSession(
+    String networkSessionId,
+  ) {
+    return _liveChallenges[networkSessionId]?.pendingRound;
   }
 
   List<LiveChallengePlayerResult> getRankedResultsForNetworkSession(
@@ -743,6 +834,9 @@ class QuizTransferService extends ChangeNotifier {
       case 'challenge_start':
         await _handleIncomingChallengeStart(peerLabel, envelope);
         return;
+      case 'challenge_round_start':
+        await _handleIncomingChallengeRoundStart(peerLabel, envelope);
+        return;
       case 'challenge_result':
         await _handleIncomingChallengeResult(peerLabel, envelope);
         return;
@@ -867,6 +961,7 @@ class QuizTransferService extends ChangeNotifier {
         localQuizId: preparedQuiz.id,
         startedAt: startedAt,
         startedLocally: false,
+        pendingRound: null,
         results: _liveChallenges[networkSessionId]?.results ?? const [],
       );
       _activeLiveChallengeId = networkSessionId;
@@ -929,6 +1024,70 @@ class QuizTransferService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _handleIncomingChallengeRoundStart(
+    String peerLabel,
+    Map<String, dynamic> envelope,
+  ) async {
+    final networkSessionId = envelope['networkSessionId']?.toString() ?? '';
+    if (networkSessionId.isEmpty) {
+      return;
+    }
+
+    final roundId =
+        envelope['roundId']?.toString() ?? 'round_${_createTransferId()}';
+    final startsAt =
+        DateTime.tryParse(envelope['startsAt']?.toString() ?? '') ??
+        DateTime.now().add(const Duration(seconds: 4));
+    final announcedAt =
+        DateTime.tryParse(envelope['announcedAt']?.toString() ?? '') ??
+        DateTime.now();
+    final roundTimeLimitSeconds = int.tryParse(
+      '${envelope['roundTimeLimitSeconds']}',
+    );
+    final normalizedRoundTimeLimit = (roundTimeLimitSeconds ?? 0) > 0
+        ? roundTimeLimitSeconds
+        : null;
+    final startedBy = envelope['startedBy']?.toString().trim();
+    final existing = _liveChallenges[networkSessionId];
+    final roundPlan = LiveChallengeRoundPlan(
+      roundId: roundId,
+      startsAt: startsAt,
+      timeLimitSeconds: normalizedRoundTimeLimit,
+      startedBy: (startedBy == null || startedBy.isEmpty) ? 'Hôte' : startedBy,
+      announcedAt: announcedAt,
+    );
+
+    if (existing == null) {
+      _liveChallenges[networkSessionId] = LiveChallengeSessionState(
+        networkSessionId: networkSessionId,
+        name: envelope['sessionName']?.toString() ?? 'Challenge réseau',
+        quizTitle: envelope['quizTitle']?.toString() ?? 'Quiz',
+        questionCount: int.tryParse('${envelope['questionCount']}') ?? 0,
+        mode: envelope['mode']?.toString() ?? ChallengeMode.friends,
+        timeLimitSeconds: int.tryParse('${envelope['timeLimitSeconds']}'),
+        localSessionId: null,
+        localQuizId: null,
+        startedAt: announcedAt,
+        startedLocally: false,
+        pendingRound: roundPlan,
+        results: const [],
+      );
+    } else {
+      _liveChallenges[networkSessionId] = existing.copyWith(
+        pendingRound: roundPlan,
+      );
+    }
+    _activeLiveChallengeId = networkSessionId;
+
+    _appendHistory(
+      direction: TransferDirection.system,
+      status: TransferStatus.info,
+      title: 'Challenge',
+      message: '[$peerLabel] Départ synchronisé reçu (${roundPlan.startedBy}).',
+    );
+    notifyListeners();
+  }
+
   Future<void> _handleIncomingChallengeLeaderboard(
     String peerLabel,
     Map<String, dynamic> envelope,
@@ -957,6 +1116,36 @@ class QuizTransferService extends ChangeNotifier {
         DateTime.tryParse(envelope['startedAt']?.toString() ?? '') ??
         existing?.startedAt ??
         DateTime.now();
+    LiveChallengeRoundPlan? pendingRound = existing?.pendingRound;
+    final pendingRoundId = envelope['pendingRoundId']?.toString();
+    final pendingStartsAtRaw = envelope['pendingRoundStartsAt']?.toString();
+    if (pendingRoundId != null &&
+        pendingRoundId.isNotEmpty &&
+        pendingStartsAtRaw != null) {
+      final pendingStartsAt = DateTime.tryParse(pendingStartsAtRaw);
+      if (pendingStartsAt != null) {
+        final pendingRoundLimit = int.tryParse(
+          '${envelope['pendingRoundTimeLimitSeconds']}',
+        );
+        pendingRound = LiveChallengeRoundPlan(
+          roundId: pendingRoundId,
+          startsAt: pendingStartsAt,
+          timeLimitSeconds: (pendingRoundLimit ?? 0) > 0
+              ? pendingRoundLimit
+              : null,
+          startedBy:
+              envelope['pendingRoundStartedBy']?.toString() ??
+              existing?.pendingRound?.startedBy ??
+              'Hôte',
+          announcedAt:
+              DateTime.tryParse(
+                envelope['pendingRoundAnnouncedAt']?.toString() ?? '',
+              ) ??
+              existing?.pendingRound?.announcedAt ??
+              startedAt,
+        );
+      }
+    }
 
     final merged = _mergeLiveResults(
       existing?.results ?? const [],
@@ -985,6 +1174,7 @@ class QuizTransferService extends ChangeNotifier {
       localQuizId: existing?.localQuizId,
       startedAt: startedAt,
       startedLocally: existing?.startedLocally ?? false,
+      pendingRound: pendingRound,
       results: _sortLiveResults(merged),
     );
     _activeLiveChallengeId = networkSessionId;
@@ -1107,6 +1297,7 @@ class QuizTransferService extends ChangeNotifier {
       localQuizId: existing?.localQuizId,
       startedAt: existing?.startedAt ?? DateTime.now(),
       startedLocally: existing?.startedLocally ?? false,
+      pendingRound: existing?.pendingRound,
       results: _sortLiveResults(merged),
     );
     _activeLiveChallengeId = networkSessionId;
@@ -1229,6 +1420,12 @@ class QuizTransferService extends ChangeNotifier {
       'mode': state.mode,
       'timeLimitSeconds': state.timeLimitSeconds,
       'startedAt': state.startedAt.toIso8601String(),
+      'pendingRoundId': state.pendingRound?.roundId,
+      'pendingRoundStartsAt': state.pendingRound?.startsAt.toIso8601String(),
+      'pendingRoundTimeLimitSeconds': state.pendingRound?.timeLimitSeconds,
+      'pendingRoundStartedBy': state.pendingRound?.startedBy,
+      'pendingRoundAnnouncedAt': state.pendingRound?.announcedAt
+          .toIso8601String(),
       'results': sorted.map((item) => item.toJson()).toList(),
     });
   }
@@ -1279,6 +1476,24 @@ class QuizTransferService extends ChangeNotifier {
       'quiz': cleanQuiz.toJson(),
     });
 
+    final pendingRound = active.pendingRound;
+    if (pendingRound != null) {
+      await _sendMessageToPeer(peerLabel, {
+        'type': 'challenge_round_start',
+        'networkSessionId': active.networkSessionId,
+        'roundId': pendingRound.roundId,
+        'sessionName': active.name,
+        'quizTitle': active.quizTitle,
+        'questionCount': active.questionCount,
+        'mode': active.mode,
+        'timeLimitSeconds': active.timeLimitSeconds,
+        'startedBy': pendingRound.startedBy,
+        'roundTimeLimitSeconds': pendingRound.timeLimitSeconds,
+        'startsAt': pendingRound.startsAt.toIso8601String(),
+        'announcedAt': pendingRound.announcedAt.toIso8601String(),
+      });
+    }
+
     if (active.results.isEmpty) {
       return;
     }
@@ -1293,6 +1508,12 @@ class QuizTransferService extends ChangeNotifier {
       'mode': active.mode,
       'timeLimitSeconds': active.timeLimitSeconds,
       'startedAt': active.startedAt.toIso8601String(),
+      'pendingRoundId': active.pendingRound?.roundId,
+      'pendingRoundStartsAt': active.pendingRound?.startsAt.toIso8601String(),
+      'pendingRoundTimeLimitSeconds': active.pendingRound?.timeLimitSeconds,
+      'pendingRoundStartedBy': active.pendingRound?.startedBy,
+      'pendingRoundAnnouncedAt': active.pendingRound?.announcedAt
+          .toIso8601String(),
       'results': sorted.map((item) => item.toJson()).toList(),
     });
   }

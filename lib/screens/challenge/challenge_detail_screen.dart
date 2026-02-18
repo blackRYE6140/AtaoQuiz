@@ -21,6 +21,8 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
   final StorageService _storageService = StorageService();
   final QuizTransferService _transferService = QuizTransferService();
   final TextEditingController _participantController = TextEditingController();
+  static const List<int> _networkRoundDurationsSeconds = [120, 300, 600, 900];
+  static const int _roundStartGraceSeconds = 12;
 
   ChallengeSession? _session;
   Quiz? _quiz;
@@ -29,6 +31,10 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
   bool _isDeleting = false;
   bool _isStartingNetwork = false;
   Timer? _reloadTimer;
+  Timer? _roundCountdownTimer;
+  LiveChallengeRoundPlan? _pendingRoundPlan;
+  int _roundCountdownSeconds = 0;
+  final Set<String> _launchedRoundIds = <String>{};
 
   @override
   void initState() {
@@ -41,6 +47,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
   @override
   void dispose() {
     _reloadTimer?.cancel();
+    _roundCountdownTimer?.cancel();
     _transferService.removeListener(_onTransferChanged);
     _participantController.dispose();
     super.dispose();
@@ -87,11 +94,13 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
         }
         _isLoading = false;
       });
+      _syncPendingRoundFromService();
     } catch (_) {
       if (!mounted) {
         return;
       }
       setState(() => _isLoading = false);
+      _syncPendingRoundFromService();
     }
   }
 
@@ -191,7 +200,223 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
     }
   }
 
-  Future<void> _openChallengeQuiz() async {
+  Future<void> _onPlayPressed() async {
+    final session = _session;
+    if (session == null) {
+      _showMessage('Challenge introuvable.', isError: true);
+      return;
+    }
+
+    final networkSessionId = session.networkSessionId;
+    final isNetworkRun =
+        networkSessionId != null && _transferService.isConnected;
+    if (!isNetworkRun) {
+      await _openChallengeQuiz();
+      return;
+    }
+
+    if (!_transferService.isHosting) {
+      final roundPlan = _transferService.getRoundPlanForNetworkSession(
+        networkSessionId,
+      );
+      if (roundPlan != null && _secondsUntilRoundStart(roundPlan) > 0) {
+        _showMessage(
+          'Départ prévu dans ${_secondsUntilRoundStart(roundPlan)}s. Attendez l\'hôte.',
+        );
+      } else {
+        _showMessage(
+          'Seul le créateur peut démarrer. Attendez le compte à rebours.',
+        );
+      }
+      return;
+    }
+
+    await _startSyncedNetworkRound(networkSessionId);
+  }
+
+  Future<void> _startSyncedNetworkRound(String networkSessionId) async {
+    if (_transferService.connectedPeersCount == 0) {
+      _showMessage(
+        'Aucun ami connecté. Ouvrez Partage via Wi-Fi avant de lancer.',
+        isError: true,
+      );
+      return;
+    }
+
+    final choice = await _showRoundStartDialog();
+    if (choice == null) {
+      return;
+    }
+
+    try {
+      final participant = _participantController.text.trim();
+      final fallbackName = await _challengeService.getLocalPlayerName();
+      final starterName = participant.isEmpty ? fallbackName : participant;
+      final roundPlan = await _transferService.startLiveChallengeRound(
+        networkSessionId: networkSessionId,
+        startedBy: starterName,
+        roundTimeLimitSeconds: choice.timeLimitSeconds,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      final countdown = _secondsUntilRoundStart(roundPlan);
+      setState(() {
+        _pendingRoundPlan = roundPlan;
+        _roundCountdownSeconds = countdown;
+      });
+      if (countdown > 0) {
+        _startRoundCountdownTicker();
+      } else {
+        unawaited(_launchRoundWhenReady(roundPlan));
+      }
+
+      final timerLabel = roundPlan.timeLimitSeconds == null
+          ? 'sans chrono'
+          : 'chrono ${_formatDurationFromSeconds(roundPlan.timeLimitSeconds!)}';
+      _showMessage('Départ synchronisé dans ${countdown}s ($timerLabel).');
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage(
+        'Impossible de démarrer la partie synchronisée: $e',
+        isError: true,
+      );
+    }
+  }
+
+  Future<_RoundStartChoice?> _showRoundStartDialog() {
+    var timerEnabled = false;
+    var selectedDuration = _networkRoundDurationsSeconds.first;
+
+    return showDialog<_RoundStartChoice>(
+      context: context,
+      builder: (dialogContext) {
+        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
+        final primaryColor = isDark
+            ? AppColors.accentYellow
+            : AppColors.primaryBlue;
+        final textColor = isDark ? AppColors.darkText : AppColors.lightText;
+        final secondaryTextColor = isDark
+            ? AppColors.darkTextSecondary
+            : AppColors.lightTextSecondary;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: isDark
+                  ? AppColors.darkCard
+                  : AppColors.lightCard,
+              title: Text(
+                'Lancer la partie réseau',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Par défaut, le défi démarre sans chrono.',
+                      style: TextStyle(
+                        color: secondaryTextColor,
+                        fontFamily: 'Poppins',
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: timerEnabled,
+                      onChanged: (value) {
+                        setDialogState(() => timerEnabled = value);
+                      },
+                      activeThumbColor: primaryColor,
+                      title: Text(
+                        'Activer défi avec temps',
+                        style: TextStyle(
+                          color: textColor,
+                          fontFamily: 'Poppins',
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        timerEnabled
+                            ? 'Le quiz se termine à la fin du chrono.'
+                            : 'Aucun chrono appliqué.',
+                        style: TextStyle(
+                          color: secondaryTextColor,
+                          fontFamily: 'Poppins',
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    if (timerEnabled) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _networkRoundDurationsSeconds.map((seconds) {
+                          return ChoiceChip(
+                            label: Text(_formatDurationFromSeconds(seconds)),
+                            selected: selectedDuration == seconds,
+                            onSelected: (_) {
+                              setDialogState(() => selectedDuration = seconds);
+                            },
+                            selectedColor: primaryColor.withValues(alpha: 0.22),
+                            side: BorderSide(
+                              color: primaryColor.withValues(alpha: 0.35),
+                            ),
+                            labelStyle: TextStyle(
+                              color: textColor,
+                              fontFamily: 'Poppins',
+                              fontWeight: selectedDuration == seconds
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text('Annuler', style: TextStyle(color: primaryColor)),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(
+                      dialogContext,
+                      _RoundStartChoice(
+                        timeLimitSeconds: timerEnabled
+                            ? selectedDuration
+                            : null,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Lancer'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _openChallengeQuiz({int? forcedTimeLimitSeconds}) async {
     final session = _session;
     final quiz = _quiz;
     if (session == null) {
@@ -215,44 +440,172 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
     final networkSessionId = session.networkSessionId;
     final shouldPublishNetwork =
         networkSessionId != null && _transferService.isConnected;
+    final fallbackTimedLimitSeconds = !shouldPublishNetwork && session.isTimed
+        ? session.timeLimitSeconds
+        : null;
+    final effectiveTimeLimitSeconds =
+        forcedTimeLimitSeconds ?? fallbackTimedLimitSeconds;
 
     final saveOperations = <Future<void>>[];
     setState(() => _isLaunchingQuiz = true);
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PlayQuizScreen(
-          quiz: quiz,
-          persistResult: false,
-          challengeTimeLimit: session.isTimed
-              ? Duration(seconds: session.timeLimitSeconds!)
-              : null,
-          onCompleted: (result) {
-            saveOperations.add(_saveAttempt(participant, session.id, result));
+    try {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PlayQuizScreen(
+            quiz: quiz,
+            persistResult: false,
+            challengeTimeLimit: effectiveTimeLimitSeconds == null
+                ? null
+                : Duration(seconds: effectiveTimeLimitSeconds),
+            onCompleted: (result) {
+              saveOperations.add(_saveAttempt(participant, session.id, result));
 
-            if (shouldPublishNetwork) {
-              saveOperations.add(
-                _transferService.submitLiveChallengeResult(
-                  networkSessionId: networkSessionId,
-                  participantName: participant,
-                  score: result.score,
-                  totalQuestions: result.totalQuestions,
-                  completionDurationMs: result.completionDurationMs,
-                ),
-              );
-            }
-          },
+              if (shouldPublishNetwork) {
+                saveOperations.add(
+                  _transferService.submitLiveChallengeResult(
+                    networkSessionId: networkSessionId,
+                    participantName: participant,
+                    score: result.score,
+                    totalQuestions: result.totalQuestions,
+                    completionDurationMs: result.completionDurationMs,
+                  ),
+                );
+              }
+            },
+          ),
         ),
-      ),
-    );
+      );
 
-    if (saveOperations.isNotEmpty) {
-      await Future.wait(saveOperations);
+      if (saveOperations.isNotEmpty) {
+        await Future.wait(saveOperations);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLaunchingQuiz = false);
+      }
     }
 
     if (mounted) {
-      setState(() => _isLaunchingQuiz = false);
       await _loadSession();
+    }
+  }
+
+  void _syncPendingRoundFromService() {
+    final networkSessionId = _session?.networkSessionId;
+    if (networkSessionId == null) {
+      if (_pendingRoundPlan != null || _roundCountdownSeconds != 0) {
+        setState(() {
+          _pendingRoundPlan = null;
+          _roundCountdownSeconds = 0;
+        });
+      }
+      _stopRoundCountdownTicker();
+      return;
+    }
+
+    final fetched = _transferService.getRoundPlanForNetworkSession(
+      networkSessionId,
+    );
+    final activePlan = (fetched != null && _isRoundPlanFresh(fetched))
+        ? fetched
+        : null;
+
+    if (activePlan == null) {
+      if (_pendingRoundPlan != null || _roundCountdownSeconds != 0) {
+        setState(() {
+          _pendingRoundPlan = null;
+          _roundCountdownSeconds = 0;
+        });
+      }
+      _stopRoundCountdownTicker();
+      return;
+    }
+
+    final countdown = _secondsUntilRoundStart(activePlan);
+    final changed =
+        _pendingRoundPlan?.roundId != activePlan.roundId ||
+        _pendingRoundPlan?.startsAt != activePlan.startsAt ||
+        _pendingRoundPlan?.timeLimitSeconds != activePlan.timeLimitSeconds ||
+        _roundCountdownSeconds != countdown;
+    if (changed) {
+      setState(() {
+        _pendingRoundPlan = activePlan;
+        _roundCountdownSeconds = countdown;
+      });
+    }
+
+    if (countdown > 0) {
+      _startRoundCountdownTicker();
+    } else {
+      _stopRoundCountdownTicker();
+      unawaited(_launchRoundWhenReady(activePlan));
+    }
+  }
+
+  void _startRoundCountdownTicker() {
+    _roundCountdownTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) {
+        _stopRoundCountdownTicker();
+        return;
+      }
+      final plan = _pendingRoundPlan;
+      if (plan == null) {
+        _stopRoundCountdownTicker();
+        return;
+      }
+
+      final countdown = _secondsUntilRoundStart(plan);
+      if (countdown > 0) {
+        if (_roundCountdownSeconds != countdown) {
+          setState(() => _roundCountdownSeconds = countdown);
+        }
+        return;
+      }
+
+      if (_roundCountdownSeconds != 0) {
+        setState(() => _roundCountdownSeconds = 0);
+      }
+      _stopRoundCountdownTicker();
+      unawaited(_launchRoundWhenReady(plan));
+    });
+  }
+
+  void _stopRoundCountdownTicker() {
+    _roundCountdownTimer?.cancel();
+    _roundCountdownTimer = null;
+  }
+
+  int _secondsUntilRoundStart(LiveChallengeRoundPlan plan) {
+    final remaining = plan.startsAt.difference(DateTime.now()).inSeconds;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  bool _isRoundPlanFresh(LiveChallengeRoundPlan plan) {
+    final delay = DateTime.now().difference(plan.startsAt).inSeconds;
+    return delay <= _roundStartGraceSeconds;
+  }
+
+  Future<void> _launchRoundWhenReady(LiveChallengeRoundPlan plan) async {
+    if (_launchedRoundIds.contains(plan.roundId) || _isLaunchingQuiz) {
+      return;
+    }
+    if (!_isRoundPlanFresh(plan)) {
+      return;
+    }
+    if (_participantController.text.trim().isEmpty) {
+      _participantController.text = await _challengeService.getLocalPlayerName();
+    }
+    _launchedRoundIds.add(plan.roundId);
+    await _openChallengeQuiz(forcedTimeLimitSeconds: plan.timeLimitSeconds);
+    if (!mounted) {
+      return;
+    }
+    if (_pendingRoundPlan?.roundId == plan.roundId) {
+      setState(() {
+        _pendingRoundPlan = null;
+        _roundCountdownSeconds = 0;
+      });
     }
   }
 
@@ -415,6 +768,16 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
     }
 
     final networkSessionId = session.networkSessionId;
+    final isNetworkRun =
+        networkSessionId != null && _transferService.isConnected;
+    final isNetworkHost = isNetworkRun && _transferService.isHosting;
+    final pendingRound = _pendingRoundPlan;
+    final isPendingRoundFresh =
+        pendingRound != null && _isRoundPlanFresh(pendingRound);
+    final isRoundCountingDown =
+        isPendingRoundFresh && (_roundCountdownSeconds > 0);
+    final isRoundStartingNow =
+        isPendingRoundFresh && (_roundCountdownSeconds == 0);
     final liveResults = networkSessionId == null
         ? const <LiveChallengePlayerResult>[]
         : _transferService.getRankedResultsForNetworkSession(networkSessionId);
@@ -430,11 +793,12 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
         _transferService.connectedPeersCount > 0 &&
         networkSessionId == null;
 
-    final playLabelBase =
-        networkSessionId != null && _transferService.isConnected
-        ? 'Jouer et publier score réseau'
+    final playLabelBase = isNetworkRun
+        ? isNetworkHost
+              ? 'Jouer et publier score réseau'
+              : 'En attente du créateur'
         : 'Jouer ce challenge';
-    final playLabel = session.isTimed
+    final playLabel = !isNetworkRun && session.isTimed
         ? '$playLabelBase (${_formatDurationFromSeconds(session.timeLimitSeconds ?? 0)})'
         : playLabelBase;
 
@@ -611,7 +975,10 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: _isLaunchingQuiz ? null : _openChallengeQuiz,
+                      onPressed:
+                          !_isLaunchingQuiz && (!isNetworkRun || isNetworkHost)
+                          ? _onPlayPressed
+                          : null,
                       icon: _isLaunchingQuiz
                           ? const SizedBox(
                               width: 14,
@@ -622,6 +989,79 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                       label: Text(playLabel),
                     ),
                   ),
+                  if (isNetworkRun) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: primaryColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: primaryColor.withValues(alpha: 0.24),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isNetworkHost
+                                ? 'Démarrage synchronisé: vous lancez, les autres attendent.'
+                                : 'Attendez le créateur: le quiz démarre automatiquement.',
+                            style: TextStyle(
+                              color: textColor,
+                              fontFamily: 'Poppins',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          if (isRoundCountingDown)
+                            Text(
+                              'Départ dans ${_roundCountdownSeconds}s • '
+                              '${pendingRound.timeLimitSeconds == null ? 'Sans chrono' : 'Chrono ${_formatDurationFromSeconds(pendingRound.timeLimitSeconds!)}'}',
+                              style: TextStyle(
+                                color: primaryColor,
+                                fontFamily: 'Poppins',
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            )
+                          else if (isRoundStartingNow)
+                            Text(
+                              'Démarrage en cours... '
+                              '${pendingRound.timeLimitSeconds == null ? 'Sans chrono' : 'Chrono ${_formatDurationFromSeconds(pendingRound.timeLimitSeconds!)}'}',
+                              style: TextStyle(
+                                color: primaryColor,
+                                fontFamily: 'Poppins',
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            )
+                          else
+                            Text(
+                              'En attente du prochain départ synchronisé.',
+                              style: TextStyle(
+                                color: secondaryTextColor,
+                                fontFamily: 'Poppins',
+                                fontSize: 12,
+                              ),
+                            ),
+                          if (pendingRound != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Lancé par: ${pendingRound.startedBy}',
+                              style: TextStyle(
+                                color: secondaryTextColor,
+                                fontFamily: 'Poppins',
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -725,4 +1165,10 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
       ),
     );
   }
+}
+
+class _RoundStartChoice {
+  final int? timeLimitSeconds;
+
+  const _RoundStartChoice({required this.timeLimitSeconds});
 }

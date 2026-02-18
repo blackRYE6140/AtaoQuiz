@@ -19,7 +19,20 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
   final ChallengeService _challengeService = ChallengeService();
   final StorageService _storageService = StorageService();
   final QuizTransferService _transferService = QuizTransferService();
-  static const List<int> _timedDurationsSeconds = [3, 5, 10, 15, 30, 60, 120, 180, 300, 400, 500, 600];
+  static const List<int> _timedDurationsSeconds = [
+    3,
+    5,
+    10,
+    15,
+    30,
+    60,
+    120,
+    180,
+    300,
+    400,
+    500,
+    600,
+  ];
   final TextEditingController _challengeNameController =
       TextEditingController();
   final TextEditingController _localPlayerController = TextEditingController();
@@ -355,7 +368,61 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                   child: Text('Annuler', style: TextStyle(color: primaryColor)),
                 ),
                 ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    final dialogNavigator = Navigator.of(dialogContext);
+                    final parentNavigator = Navigator.of(parentContext);
+                    final hasPeerNow = _transferService.connectedPeersCount > 0;
+                    if (selectedMode == ChallengeMode.friends && !hasPeerNow) {
+                      final goToWifi = await showDialog<bool>(
+                        context: dialogContext,
+                        builder: (popupContext) {
+                          return AlertDialog(
+                            backgroundColor: isDark
+                                ? AppColors.darkCard
+                                : AppColors.lightCard,
+                            title: Text(
+                              'Aucun ami rejoint',
+                              style: TextStyle(
+                                fontFamily: 'Poppins',
+                                fontWeight: FontWeight.w600,
+                                color: textColor,
+                              ),
+                            ),
+                            content: Text(
+                              'Le défi entre amis nécessite au moins un autre téléphone connecté.\n'
+                              'Passez par Partage via Wi‑Fi pour inviter un ami.',
+                              style: TextStyle(
+                                fontFamily: 'Poppins',
+                                color: textColor,
+                              ),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.pop(popupContext, false),
+                                child: Text(
+                                  'Annuler',
+                                  style: TextStyle(color: primaryColor),
+                                ),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () =>
+                                    Navigator.pop(popupContext, true),
+                                icon: const Icon(Icons.wifi_tethering),
+                                label: const Text('Partager via Wi-Fi'),
+                              ),
+                            ],
+                          );
+                        },
+                      );
+
+                      if (goToWifi == true) {
+                        dialogNavigator.pop();
+                        await parentNavigator.pushNamed('/transfer-quiz');
+                      }
+                      return;
+                    }
+
                     Navigator.pop(
                       dialogContext,
                       _ChallengeCreationChoice(

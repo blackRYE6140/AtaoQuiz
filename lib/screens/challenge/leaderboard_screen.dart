@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:atao_quiz/services/challenge_service.dart';
+import 'package:atao_quiz/services/user_profile_service.dart';
 import 'package:atao_quiz/theme/colors.dart';
 import 'package:flutter/material.dart';
+import 'package:atao_quiz/components/profile_avatar.dart';
+import 'package:atao_quiz/screens/profile_screen.dart';
 
 class LeaderboardScreen extends StatefulWidget {
   const LeaderboardScreen({super.key});
@@ -11,21 +16,47 @@ class LeaderboardScreen extends StatefulWidget {
 
 class _LeaderboardScreenState extends State<LeaderboardScreen> {
   final ChallengeService _challengeService = ChallengeService();
+  final UserProfileService _profileService = UserProfileService();
 
   List<LeaderboardEntry> _entries = [];
-  String _localPlayerName = 'Moi';
+  UserProfile _profile = const UserProfile(
+    displayName: UserProfileService.defaultDisplayName,
+    avatarIndex: 0,
+    isConfigured: false,
+  );
   bool _isLoading = true;
+  bool _profilePromptHandled = false;
 
   @override
   void initState() {
     super.initState();
+    _profileService.addListener(_onProfileChanged);
     _loadLeaderboard();
+  }
+
+  @override
+  void dispose() {
+    _profileService.removeListener(_onProfileChanged);
+    super.dispose();
+  }
+
+  void _onProfileChanged() {
+    if (!mounted) {
+      return;
+    }
+    final profile = _profileService.profileOrDefault;
+    if (profile.displayName == _profile.displayName &&
+        profile.avatarIndex == _profile.avatarIndex &&
+        profile.isConfigured == _profile.isConfigured) {
+      return;
+    }
+    setState(() => _profile = profile);
   }
 
   Future<void> _loadLeaderboard() async {
     setState(() => _isLoading = true);
     try {
-      final localName = await _challengeService.getLocalPlayerName();
+      final profile = await _profileService.getProfile();
       final entries = await _challengeService.getLeaderboard();
 
       if (!mounted) {
@@ -34,15 +65,78 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
 
       setState(() {
         _entries = entries;
-        _localPlayerName = localName;
+        _profile = profile;
         _isLoading = false;
       });
+      unawaited(_ensureProfileConfiguredOnce());
     } catch (_) {
       if (!mounted) {
         return;
       }
       setState(() => _isLoading = false);
+      unawaited(_ensureProfileConfiguredOnce());
     }
+  }
+
+  Future<void> _ensureProfileConfiguredOnce() async {
+    if (_profilePromptHandled) {
+      return;
+    }
+    _profilePromptHandled = true;
+
+    final shouldPrompt = await _profileService.shouldPromptProfileSetupOnce(
+      area: UserProfileService.promptAreaLeaderboard,
+    );
+    if (!shouldPrompt || !mounted) {
+      return;
+    }
+
+    await _profileService.markProfileSetupPromptShown(
+      area: UserProfileService.promptAreaLeaderboard,
+    );
+    if (!mounted) {
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
+        final textColor = isDark ? AppColors.darkText : AppColors.lightText;
+        return AlertDialog(
+          backgroundColor: isDark ? AppColors.darkCard : AppColors.lightCard,
+          title: Text(
+            'Profil requis',
+            style: TextStyle(
+              color: textColor,
+              fontFamily: 'Poppins',
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          content: Text(
+            'Configurez votre profil pour synchroniser le classement.',
+            style: TextStyle(color: textColor, fontFamily: 'Poppins'),
+          ),
+          actions: [
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(dialogContext),
+              icon: const Icon(Icons.person),
+              label: const Text('Configurer'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) {
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfileScreen(setupFlow: true)),
+    );
+    await _loadLeaderboard();
   }
 
   BoxDecoration _cardDecoration(bool isDark, Color primaryColor) {
@@ -90,7 +184,8 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
 
     LeaderboardEntry? localEntry;
     for (final entry in _entries) {
-      if (entry.playerName.toLowerCase() == _localPlayerName.toLowerCase()) {
+      if (entry.playerName.toLowerCase() ==
+          _profile.displayName.toLowerCase()) {
         localEntry = entry;
         break;
       }
@@ -120,18 +215,38 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      CircleAvatar(
-                        radius: 18,
-                        backgroundColor: primaryColor.withValues(alpha: 0.18),
-                        child: Text(
-                          'Lv.${localEntry.level}',
-                          style: TextStyle(
-                            fontFamily: 'Poppins',
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: primaryColor,
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          ProfileAvatar(
+                            avatarIndex: _profile.avatarIndex,
+                            radius: 18,
+                            accentColor: primaryColor,
                           ),
-                        ),
+                          Positioned(
+                            right: -6,
+                            bottom: -6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: primaryColor.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                'Lv.${localEntry.level}',
+                                style: TextStyle(
+                                  fontFamily: 'Poppins',
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: primaryColor,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -206,22 +321,28 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
               );
               final isLocal =
                   entry.playerName.toLowerCase() ==
-                  _localPlayerName.toLowerCase();
+                  _profile.displayName.toLowerCase();
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: _cardDecoration(isDark, primaryColor),
                 child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: rankColor.withValues(alpha: 0.18),
-                    child: Text(
-                      '${entry.rank}',
-                      style: TextStyle(
-                        color: rankColor,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
+                  leading: isLocal
+                      ? ProfileAvatar(
+                          avatarIndex: _profile.avatarIndex,
+                          radius: 18,
+                          accentColor: primaryColor,
+                        )
+                      : CircleAvatar(
+                          backgroundColor: rankColor.withValues(alpha: 0.18),
+                          child: Text(
+                            '${entry.rank}',
+                            style: TextStyle(
+                              color: rankColor,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
                   title: Text(
                     isLocal ? '${entry.playerName} (Moi)' : entry.playerName,
                     style: TextStyle(

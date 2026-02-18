@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:atao_quiz/services/storage_service.dart';
+import 'package:atao_quiz/services/user_profile_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ChallengeMode {
@@ -241,24 +242,55 @@ class ChallengeService {
   ChallengeService._internal();
 
   static const String _sessionsKey = 'challenge_sessions_v1';
-  static const String _localPlayerNameKey = 'challenge_local_player_name_v1';
   static const String _defaultLocalPlayerName = 'Moi';
 
   final StorageService _storageService = StorageService();
+  final UserProfileService _profileService = UserProfileService();
 
   Future<String> getLocalPlayerName() async {
-    final prefs = await SharedPreferences.getInstance();
-    final value = prefs.getString(_localPlayerNameKey);
-    if (value == null || value.trim().isEmpty) {
-      return _defaultLocalPlayerName;
-    }
-    return _normalizePlayerName(value);
+    return _profileService.getDisplayName();
   }
 
   Future<void> setLocalPlayerName(String value) async {
-    final normalized = _normalizePlayerName(value);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_localPlayerNameKey, normalized);
+    final profile = await _profileService.getProfile();
+    await _profileService.saveProfile(
+      displayName: value,
+      avatarIndex: profile.avatarIndex,
+      markConfigured: profile.isConfigured,
+    );
+  }
+
+  Future<void> renamePlayerInAllSessions({
+    required String oldName,
+    required String newName,
+  }) async {
+    final oldKey = _playerKey(oldName);
+    final normalizedNewName = _normalizePlayerName(newName);
+    final newKey = _playerKey(normalizedNewName);
+    if (oldKey.isEmpty || newKey.isEmpty || oldKey == newKey) {
+      return;
+    }
+
+    final sessions = await getSessions();
+    bool hasChanges = false;
+    final updatedSessions = sessions.map((session) {
+      bool sessionChanged = false;
+      final updatedAttempts = session.attempts.map((attempt) {
+        if (_playerKey(attempt.participantName) != oldKey) {
+          return attempt;
+        }
+        hasChanges = true;
+        sessionChanged = true;
+        return attempt.copyWith(participantName: normalizedNewName);
+      }).toList();
+      return sessionChanged
+          ? session.copyWith(attempts: updatedAttempts)
+          : session;
+    }).toList();
+
+    if (hasChanges) {
+      await _saveSessions(updatedSessions);
+    }
   }
 
   Future<List<ChallengeSession>> getSessions() async {
@@ -763,14 +795,11 @@ class ChallengeService {
   }
 
   String _normalizePlayerName(String name) {
-    final cleaned = name.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (cleaned.isEmpty) {
+    final normalized = UserProfileService.normalizeDisplayName(name);
+    if (normalized.trim().isEmpty) {
       return _defaultLocalPlayerName;
     }
-    if (cleaned.length == 1) {
-      return cleaned.toUpperCase();
-    }
-    return '${cleaned[0].toUpperCase()}${cleaned.substring(1)}';
+    return normalized;
   }
 
   String _playerKey(String name) => name.trim().toLowerCase();

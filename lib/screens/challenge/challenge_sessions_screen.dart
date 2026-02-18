@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:atao_quiz/components/profile_avatar.dart';
 import 'package:atao_quiz/screens/challenge/challenge_detail_screen.dart';
+import 'package:atao_quiz/screens/profile_screen.dart';
 import 'package:atao_quiz/services/challenge_service.dart';
 import 'package:atao_quiz/services/quiz_transfer_service.dart';
 import 'package:atao_quiz/services/storage_service.dart';
+import 'package:atao_quiz/services/user_profile_service.dart';
 import 'package:atao_quiz/theme/colors.dart';
 import 'package:flutter/material.dart';
 
@@ -19,6 +22,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
   final ChallengeService _challengeService = ChallengeService();
   final StorageService _storageService = StorageService();
   final QuizTransferService _transferService = QuizTransferService();
+  final UserProfileService _profileService = UserProfileService();
   static const List<int> _timedDurationsSeconds = [
     3,
     5,
@@ -35,20 +39,25 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
   ];
   final TextEditingController _challengeNameController =
       TextEditingController();
-  final TextEditingController _localPlayerController = TextEditingController();
   Timer? _reloadTimer;
 
+  UserProfile _profile = const UserProfile(
+    displayName: UserProfileService.defaultDisplayName,
+    avatarIndex: 0,
+    isConfigured: false,
+  );
   List<ChallengeSession> _sessions = [];
   List<Quiz> _quizzes = [];
   Quiz? _selectedQuiz;
   bool _isLoading = true;
   bool _isCreating = false;
-  bool _isSavingName = false;
+  bool _profilePromptHandled = false;
 
   @override
   void initState() {
     super.initState();
     _transferService.addListener(_onTransferChanged);
+    _profileService.addListener(_onProfileChanged);
     _transferService.initialize();
     _loadData();
   }
@@ -57,8 +66,8 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
   void dispose() {
     _reloadTimer?.cancel();
     _transferService.removeListener(_onTransferChanged);
+    _profileService.removeListener(_onProfileChanged);
     _challengeNameController.dispose();
-    _localPlayerController.dispose();
     super.dispose();
   }
 
@@ -74,12 +83,27 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
     });
   }
 
+  void _onProfileChanged() {
+    if (!mounted) {
+      return;
+    }
+    final nextProfile = _profileService.profileOrDefault;
+    if (nextProfile.displayName == _profile.displayName &&
+        nextProfile.avatarIndex == _profile.avatarIndex &&
+        nextProfile.isConfigured == _profile.isConfigured) {
+      return;
+    }
+    setState(() {
+      _profile = nextProfile;
+    });
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
       final sessions = await _challengeService.getSessions();
       final quizzes = await _storageService.getQuizzes();
-      final localName = await _challengeService.getLocalPlayerName();
+      final profile = await _profileService.getProfile();
       quizzes.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
       if (!mounted) {
@@ -93,14 +117,16 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
           selectedQuiz: _selectedQuiz,
           quizzes: quizzes,
         );
-        _localPlayerController.text = localName;
+        _profile = profile;
         _isLoading = false;
       });
+      unawaited(_ensureProfileConfiguredOnce());
     } catch (_) {
       if (!mounted) {
         return;
       }
       setState(() => _isLoading = false);
+      unawaited(_ensureProfileConfiguredOnce());
     }
   }
 
@@ -174,31 +200,66 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
     }
   }
 
-  Future<void> _saveLocalPlayerName() async {
-    final name = _localPlayerController.text.trim();
-    if (name.isEmpty) {
-      _showMessage('Nom joueur invalide.', isError: true);
+  Future<void> _ensureProfileConfiguredOnce() async {
+    if (_profilePromptHandled) {
+      return;
+    }
+    _profilePromptHandled = true;
+
+    final shouldPrompt = await _profileService.shouldPromptProfileSetupOnce(
+      area: UserProfileService.promptAreaChallenge,
+    );
+    if (!shouldPrompt || !mounted) {
       return;
     }
 
-    setState(() => _isSavingName = true);
-    try {
-      await _challengeService.setLocalPlayerName(name);
-      if (!mounted) {
-        return;
-      }
-      _showMessage('Nom joueur mis à jour.');
-      await _loadData();
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      _showMessage('Impossible de sauvegarder le nom: $e', isError: true);
-    } finally {
-      if (mounted) {
-        setState(() => _isSavingName = false);
-      }
+    await _profileService.markProfileSetupPromptShown(
+      area: UserProfileService.promptAreaChallenge,
+    );
+    if (!mounted) {
+      return;
     }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
+        final textColor = isDark ? AppColors.darkText : AppColors.lightText;
+        return AlertDialog(
+          backgroundColor: isDark ? AppColors.darkCard : AppColors.lightCard,
+          title: Text(
+            'Profil requis',
+            style: TextStyle(
+              color: textColor,
+              fontFamily: 'Poppins',
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          content: Text(
+            'Configurez votre profil (nom + image) avant de lancer vos défis.',
+            style: TextStyle(color: textColor, fontFamily: 'Poppins'),
+          ),
+          actions: [
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(dialogContext),
+              icon: const Icon(Icons.person),
+              label: const Text('Configurer'),
+            ),
+          ],
+        );
+      },
+    );
+
+    await _openProfileScreen(setupFlow: true);
+  }
+
+  Future<void> _openProfileScreen({bool setupFlow = false}) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ProfileScreen(setupFlow: setupFlow)),
+    );
+    await _loadData();
   }
 
   Future<_ChallengeCreationChoice?> _showChallengeModeDialog() {
@@ -621,7 +682,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Profil challenge',
+                  'Profil synchronisé',
                   style: TextStyle(
                     fontFamily: 'Poppins',
                     fontWeight: FontWeight.w600,
@@ -629,27 +690,55 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                TextField(
-                  controller: _localPlayerController,
-                  textInputAction: TextInputAction.done,
-                  decoration: _inputDecoration(
-                    labelText: 'Nom joueur local',
-                    primaryColor: primaryColor,
-                  ),
+                Row(
+                  children: [
+                    ProfileAvatar(
+                      avatarIndex: _profile.avatarIndex,
+                      radius: 22,
+                      accentColor: primaryColor,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _profile.displayName,
+                            style: TextStyle(
+                              color: textColor,
+                              fontFamily: 'Poppins',
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _profile.isConfigured
+                                ? 'Nom et image utilisés dans challenge et classement.'
+                                : 'Configurez le profil pour synchroniser vos résultats.',
+                            style: TextStyle(
+                              color: secondaryTextColor,
+                              fontFamily: 'Poppins',
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Align(
                   alignment: Alignment.centerRight,
-                  child: ElevatedButton.icon(
-                    onPressed: _isSavingName ? null : _saveLocalPlayerName,
-                    icon: _isSavingName
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_alt),
-                    label: const Text('Enregistrer'),
+                  child: OutlinedButton.icon(
+                    onPressed: _openProfileScreen,
+                    icon: const Icon(Icons.edit),
+                    label: const Text('Modifier profil'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: primaryColor,
+                      side: BorderSide(
+                        color: primaryColor.withValues(alpha: 0.35),
+                      ),
+                    ),
                   ),
                 ),
               ],

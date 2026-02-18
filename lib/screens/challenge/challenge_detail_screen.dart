@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:atao_quiz/components/profile_avatar.dart';
 import 'package:atao_quiz/screens/generatequiz/play_quiz_screen.dart';
 import 'package:atao_quiz/services/challenge_service.dart';
 import 'package:atao_quiz/services/quiz_transfer_service.dart';
 import 'package:atao_quiz/services/storage_service.dart';
+import 'package:atao_quiz/services/user_profile_service.dart';
 import 'package:atao_quiz/theme/colors.dart';
 import 'package:flutter/material.dart';
 
@@ -20,12 +22,18 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
   final ChallengeService _challengeService = ChallengeService();
   final StorageService _storageService = StorageService();
   final QuizTransferService _transferService = QuizTransferService();
+  final UserProfileService _profileService = UserProfileService();
   final TextEditingController _participantController = TextEditingController();
   static const List<int> _networkRoundDurationsSeconds = [120, 300, 600, 900];
   static const int _roundStartGraceSeconds = 12;
 
   ChallengeSession? _session;
   Quiz? _quiz;
+  UserProfile _profile = const UserProfile(
+    displayName: UserProfileService.defaultDisplayName,
+    avatarIndex: 0,
+    isConfigured: false,
+  );
   bool _isLoading = true;
   bool _isLaunchingQuiz = false;
   bool _isDeleting = false;
@@ -40,6 +48,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
   void initState() {
     super.initState();
     _transferService.addListener(_onTransferChanged);
+    _profileService.addListener(_onProfileChanged);
     _transferService.initialize();
     _loadSession();
   }
@@ -49,6 +58,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
     _reloadTimer?.cancel();
     _roundCountdownTimer?.cancel();
     _transferService.removeListener(_onTransferChanged);
+    _profileService.removeListener(_onProfileChanged);
     _participantController.dispose();
     super.dispose();
   }
@@ -65,12 +75,30 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
     });
   }
 
+  void _onProfileChanged() {
+    if (!mounted) {
+      return;
+    }
+    final next = _profileService.profileOrDefault;
+    if (next.displayName == _profile.displayName &&
+        next.avatarIndex == _profile.avatarIndex &&
+        next.isConfigured == _profile.isConfigured) {
+      return;
+    }
+    setState(() {
+      _profile = next;
+      if (_participantController.text.trim().isEmpty) {
+        _participantController.text = next.displayName;
+      }
+    });
+  }
+
   Future<void> _loadSession() async {
     setState(() => _isLoading = true);
     try {
       final session = await _challengeService.getSessionById(widget.sessionId);
       final quizzes = await _storageService.getQuizzes();
-      final localName = await _challengeService.getLocalPlayerName();
+      final profile = await _profileService.getProfile();
 
       Quiz? quiz;
       if (session != null) {
@@ -90,8 +118,9 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
         _session = session;
         _quiz = quiz;
         if (_participantController.text.trim().isEmpty) {
-          _participantController.text = localName;
+          _participantController.text = profile.displayName;
         }
+        _profile = profile;
         _isLoading = false;
       });
       _syncPendingRoundFromService();
@@ -594,7 +623,8 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
       return;
     }
     if (_participantController.text.trim().isEmpty) {
-      _participantController.text = await _challengeService.getLocalPlayerName();
+      _participantController.text = await _challengeService
+          .getLocalPlayerName();
     }
     _launchedRoundIds.add(plan.roundId);
     await _openChallengeQuiz(forcedTimeLimitSeconds: plan.timeLimitSeconds);
@@ -961,6 +991,27 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                       fontFamily: 'Poppins',
                       fontWeight: FontWeight.w600,
                     ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      ProfileAvatar(
+                        avatarIndex: _profile.avatarIndex,
+                        radius: 16,
+                        accentColor: primaryColor,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Profil actif: ${_profile.displayName}',
+                          style: TextStyle(
+                            color: secondaryTextColor,
+                            fontFamily: 'Poppins',
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 10),
                   TextField(

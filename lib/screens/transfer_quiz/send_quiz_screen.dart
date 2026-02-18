@@ -214,7 +214,9 @@ class _SendQuizScreenState extends State<SendQuizScreen> {
 
     final isBusy = _isSending || _transferService.isSendingBatch;
     final connectedLabel = _transferService.isConnected
-        ? 'Connecté: ${_transferService.connectedPeer ?? 'pair'}'
+        ? _transferService.connectedPeersCount == 1
+              ? 'Connecté: ${_transferService.connectedPeer ?? 'pair'}'
+              : '${_transferService.connectedPeersCount} pairs connectés'
         : 'Aucun pair connecté';
 
     if (_isLoading) {

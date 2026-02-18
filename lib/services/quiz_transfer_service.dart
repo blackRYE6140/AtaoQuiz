@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:atao_quiz/services/challenge_service.dart';
 import 'package:atao_quiz/services/storage_service.dart';
 import 'package:flutter/foundation.dart';
 
@@ -39,6 +40,100 @@ class TransferTarget {
   const TransferTarget({required this.host, required this.port});
 }
 
+class LiveChallengePlayerResult {
+  final String playerName;
+  final int score;
+  final int totalQuestions;
+  final int completionDurationMs;
+  final DateTime completedAt;
+
+  const LiveChallengePlayerResult({
+    required this.playerName,
+    required this.score,
+    required this.totalQuestions,
+    required this.completionDurationMs,
+    required this.completedAt,
+  });
+
+  double get successRate {
+    if (totalQuestions <= 0) {
+      return 0;
+    }
+    return score / totalQuestions;
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'playerName': playerName,
+      'score': score,
+      'totalQuestions': totalQuestions,
+      'completionDurationMs': completionDurationMs,
+      'completedAt': completedAt.toIso8601String(),
+    };
+  }
+
+  factory LiveChallengePlayerResult.fromJson(Map<String, dynamic> json) {
+    return LiveChallengePlayerResult(
+      playerName: json['playerName']?.toString() ?? 'Joueur',
+      score: int.tryParse('${json['score']}') ?? 0,
+      totalQuestions: int.tryParse('${json['totalQuestions']}') ?? 0,
+      completionDurationMs:
+          int.tryParse('${json['completionDurationMs']}') ?? 0,
+      completedAt:
+          DateTime.tryParse(json['completedAt']?.toString() ?? '') ??
+          DateTime.now(),
+    );
+  }
+}
+
+class LiveChallengeSessionState {
+  final String networkSessionId;
+  final String name;
+  final String quizTitle;
+  final int questionCount;
+  final String? localSessionId;
+  final String? localQuizId;
+  final DateTime startedAt;
+  final bool startedLocally;
+  final List<LiveChallengePlayerResult> results;
+
+  const LiveChallengeSessionState({
+    required this.networkSessionId,
+    required this.name,
+    required this.quizTitle,
+    required this.questionCount,
+    required this.localSessionId,
+    required this.localQuizId,
+    required this.startedAt,
+    required this.startedLocally,
+    required this.results,
+  });
+
+  LiveChallengeSessionState copyWith({
+    String? networkSessionId,
+    String? name,
+    String? quizTitle,
+    int? questionCount,
+    String? localSessionId,
+    String? localQuizId,
+    DateTime? startedAt,
+    bool? startedLocally,
+    List<LiveChallengePlayerResult>? results,
+  }) {
+    return LiveChallengeSessionState(
+      networkSessionId: networkSessionId ?? this.networkSessionId,
+      name: name ?? this.name,
+      quizTitle: quizTitle ?? this.quizTitle,
+      questionCount: questionCount ?? this.questionCount,
+      localSessionId: localSessionId ?? this.localSessionId,
+      localQuizId: localQuizId ?? this.localQuizId,
+      startedAt: startedAt ?? this.startedAt,
+      startedLocally: startedLocally ?? this.startedLocally,
+      results: results ?? this.results,
+    );
+  }
+}
+
 class QuizTransferService extends ChangeNotifier {
   static const int defaultPort = 4040;
   static const String _protocol = 'atao_quiz.live_transfer';
@@ -50,6 +145,7 @@ class QuizTransferService extends ChangeNotifier {
   QuizTransferService._internal();
 
   final StorageService _storageService = StorageService();
+  final ChallengeService _challengeService = ChallengeService();
   final Random _random = Random();
 
   TransferConnectionState _connectionState =
@@ -64,8 +160,12 @@ class QuizTransferService extends ChangeNotifier {
 
   ServerSocket? _serverSocket;
   StreamSubscription<Socket>? _serverSubscription;
-  Socket? _socket;
-  StreamSubscription<String>? _socketLineSubscription;
+
+  final Map<String, Socket> _peerSockets = {};
+  final Map<String, StreamSubscription<String>> _peerLineSubscriptions = {};
+
+  final Map<String, LiveChallengeSessionState> _liveChallenges = {};
+  String? _activeLiveChallengeId;
 
   TransferConnectionState get connectionState => _connectionState;
   String get statusMessage => _statusMessage;
@@ -73,13 +173,30 @@ class QuizTransferService extends ChangeNotifier {
   int get activePort => _activePort;
   bool get isSendingBatch => _isSendingBatch;
   String? get connectedPeer => _connectedPeer;
-  bool get isConnected =>
-      _connectionState == TransferConnectionState.connected && _socket != null;
-  bool get isHosting => _connectionState == TransferConnectionState.hosting;
+  List<String> get connectedPeers =>
+      List.unmodifiable(_peerSockets.keys.toList());
+  int get connectedPeersCount => _peerSockets.length;
+  bool get isConnected => _peerSockets.isNotEmpty;
+  bool get isHosting => _serverSocket != null;
   bool get canReconnect =>
       _lastConnectedHost != null &&
       _connectionState != TransferConnectionState.connected;
   List<TransferHistoryEntry> get history => List.unmodifiable(_history);
+  bool get canStartLiveChallenge => isConnected;
+
+  List<LiveChallengeSessionState> get liveChallengeSessions {
+    final values = _liveChallenges.values.toList()
+      ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    return List.unmodifiable(values);
+  }
+
+  LiveChallengeSessionState? get activeLiveChallenge {
+    final id = _activeLiveChallengeId;
+    if (id == null) {
+      return null;
+    }
+    return _liveChallenges[id];
+  }
 
   Future<void> initialize() async {
     await refreshLocalIps();
@@ -192,8 +309,7 @@ class QuizTransferService extends ChangeNotifier {
       );
 
       await refreshLocalIps();
-      _statusMessage =
-          'Serveur actif sur le port $port. Partagez le QR au second téléphone.';
+      _updateConnectionStatus();
       _appendHistory(
         direction: TransferDirection.system,
         status: TransferStatus.info,
@@ -220,11 +336,8 @@ class QuizTransferService extends ChangeNotifier {
 
     if (!keepConnection) {
       await disconnect(addLog: false);
-    }
-
-    if (!isConnected) {
-      _connectionState = TransferConnectionState.disconnected;
-      _statusMessage = 'Serveur arrêté.';
+    } else {
+      _updateConnectionStatus();
     }
 
     if (addLog) {
@@ -251,7 +364,12 @@ class QuizTransferService extends ChangeNotifier {
       throw const FormatException('Port invalide (1..65535).');
     }
 
-    await disconnect(addLog: false);
+    if (_serverSocket != null) {
+      await stopHosting(keepConnection: false, addLog: false);
+    } else {
+      await disconnect(addLog: false);
+    }
+
     _connectionState = TransferConnectionState.connecting;
     _statusMessage = 'Connexion vers $host:$port...';
     notifyListeners();
@@ -267,6 +385,7 @@ class QuizTransferService extends ChangeNotifier {
         title: 'Connexion',
         message: 'Connecté à $host:$port',
       );
+      notifyListeners();
     } catch (e) {
       _connectionState = TransferConnectionState.disconnected;
       _statusMessage = 'Échec connexion: $e';
@@ -284,20 +403,20 @@ class QuizTransferService extends ChangeNotifier {
   }
 
   Future<void> disconnect({bool addLog = true}) async {
-    await _socketLineSubscription?.cancel();
-    _socketLineSubscription = null;
-    _socket?.destroy();
-    _socket = null;
-    _connectedPeer = null;
+    final subscriptions = _peerLineSubscriptions.values.toList();
+    final sockets = _peerSockets.values.toList();
+    _peerLineSubscriptions.clear();
+    _peerSockets.clear();
 
-    if (_serverSocket != null) {
-      _connectionState = TransferConnectionState.hosting;
-      _statusMessage =
-          'Serveur actif sur le port $_activePort. En attente d\'un pair.';
-    } else {
-      _connectionState = TransferConnectionState.disconnected;
-      _statusMessage = 'Connexion fermée.';
+    for (final subscription in subscriptions) {
+      await subscription.cancel();
     }
+    for (final socket in sockets) {
+      socket.destroy();
+    }
+
+    _connectedPeer = null;
+    _updateConnectionStatus(reasonIfNoServer: 'Connexion fermée.');
 
     if (addLog) {
       _appendHistory(
@@ -319,13 +438,9 @@ class QuizTransferService extends ChangeNotifier {
       throw StateError('Aucun quiz sélectionné.');
     }
 
-    final socket = _socket;
-    if (socket == null) {
-      throw StateError('Socket indisponible.');
-    }
-
     _isSendingBatch = true;
-    _statusMessage = 'Envoi de ${quizzes.length} quiz en cours...';
+    _statusMessage =
+        'Envoi de ${quizzes.length} quiz vers ${_peerSockets.length} pair(s)...';
     notifyListeners();
 
     for (final quiz in quizzes) {
@@ -339,12 +454,12 @@ class QuizTransferService extends ChangeNotifier {
       };
 
       try {
-        await _sendMessage(socket, payload);
+        await _sendMessageToAll(payload);
         _appendHistory(
           direction: TransferDirection.sent,
           status: TransferStatus.success,
           title: cleanQuiz.title,
-          message: 'Quiz envoyé.',
+          message: 'Quiz envoyé à ${_peerSockets.length} pair(s).',
         );
       } catch (e) {
         _appendHistory(
@@ -357,8 +472,127 @@ class QuizTransferService extends ChangeNotifier {
     }
 
     _isSendingBatch = false;
-    _statusMessage = 'Envoi terminé.';
+    _updateConnectionStatus();
     notifyListeners();
+  }
+
+  Future<String> startLiveChallenge({
+    required ChallengeSession session,
+    required Quiz quiz,
+    required String hostPlayerName,
+  }) async {
+    if (!isConnected) {
+      throw StateError('Aucun pair connecté.');
+    }
+
+    final networkSessionId =
+        session.networkSessionId ?? _createNetworkChallengeId();
+    if (session.networkSessionId == null) {
+      await _challengeService.linkSessionToNetworkSession(
+        sessionId: session.id,
+        networkSessionId: networkSessionId,
+      );
+    }
+
+    final cleanQuiz = _sanitizeOutgoingQuiz(quiz);
+    final startedAt = DateTime.now();
+
+    _liveChallenges[networkSessionId] = LiveChallengeSessionState(
+      networkSessionId: networkSessionId,
+      name: session.name,
+      quizTitle: session.quizTitle,
+      questionCount: session.questionCount,
+      localSessionId: session.id,
+      localQuizId: quiz.id,
+      startedAt: startedAt,
+      startedLocally: true,
+      results: _liveChallenges[networkSessionId]?.results ?? const [],
+    );
+    _activeLiveChallengeId = networkSessionId;
+
+    await _sendMessageToAll({
+      'type': 'challenge_start',
+      'networkSessionId': networkSessionId,
+      'sessionName': session.name,
+      'quizTitle': session.quizTitle,
+      'questionCount': session.questionCount,
+      'hostPlayerName': hostPlayerName.trim(),
+      'startedAt': startedAt.toIso8601String(),
+      'quiz': cleanQuiz.toJson(),
+    });
+
+    _appendHistory(
+      direction: TransferDirection.system,
+      status: TransferStatus.info,
+      title: 'Challenge',
+      message:
+          'Challenge réseau "${session.name}" lancé pour ${_peerSockets.length} pair(s).',
+    );
+    _statusMessage = 'Challenge réseau actif: ${session.name}';
+    notifyListeners();
+    return networkSessionId;
+  }
+
+  Future<void> submitLiveChallengeResult({
+    required String networkSessionId,
+    required String participantName,
+    required int score,
+    required int totalQuestions,
+    required int completionDurationMs,
+  }) async {
+    if (totalQuestions <= 0) {
+      throw const FormatException('Le quiz doit contenir au moins 1 question.');
+    }
+    if (score < 0 || score > totalQuestions) {
+      throw const FormatException('Score invalide.');
+    }
+    if (completionDurationMs < 0) {
+      throw const FormatException('Durée invalide.');
+    }
+
+    final normalizedName = participantName.trim();
+    if (normalizedName.isEmpty) {
+      throw const FormatException('Nom joueur vide.');
+    }
+
+    final result = LiveChallengePlayerResult(
+      playerName: normalizedName,
+      score: score,
+      totalQuestions: totalQuestions,
+      completionDurationMs: completionDurationMs,
+      completedAt: DateTime.now(),
+    );
+
+    _upsertLiveResult(networkSessionId, result);
+    await _persistLiveResult(networkSessionId, result);
+
+    if (_serverSocket != null) {
+      await _broadcastLiveLeaderboard(networkSessionId);
+    } else {
+      await _sendMessageToAll({
+        'type': 'challenge_result',
+        'networkSessionId': networkSessionId,
+        'result': result.toJson(),
+      });
+    }
+
+    notifyListeners();
+  }
+
+  LiveChallengeSessionState? getLiveChallengeByNetworkId(
+    String networkSessionId,
+  ) {
+    return _liveChallenges[networkSessionId];
+  }
+
+  List<LiveChallengePlayerResult> getRankedResultsForNetworkSession(
+    String networkSessionId,
+  ) {
+    final session = _liveChallenges[networkSessionId];
+    if (session == null) {
+      return const [];
+    }
+    return _sortLiveResults(session.results);
   }
 
   Future<void> removeHistoryEntry(TransferHistoryEntry entry) async {
@@ -375,89 +609,76 @@ class QuizTransferService extends ChangeNotifier {
   }
 
   Future<void> _onClientIncoming(Socket client) async {
-    if (_socket != null) {
-      client.destroy();
-      _appendHistory(
-        direction: TransferDirection.system,
-        status: TransferStatus.info,
-        title: 'Connexion',
-        message: 'Nouveau pair refusé: connexion déjà active.',
-      );
-      return;
-    }
-
-    await _attachSocket(
-      client,
-      peerLabel: '${client.remoteAddress.address}:${client.remotePort}',
-    );
+    final peerLabel = '${client.remoteAddress.address}:${client.remotePort}';
+    await _attachSocket(client, peerLabel: peerLabel);
     _appendHistory(
       direction: TransferDirection.system,
       status: TransferStatus.info,
       title: 'Connexion',
-      message: 'Pair connecté: ${client.remoteAddress.address}',
+      message: 'Pair connecté: $peerLabel',
     );
+    notifyListeners();
   }
 
   Future<void> _attachSocket(Socket socket, {required String peerLabel}) async {
-    await _socketLineSubscription?.cancel();
-    _socket?.destroy();
+    final existingSubscription = _peerLineSubscriptions.remove(peerLabel);
+    final existingSocket = _peerSockets.remove(peerLabel);
+    await existingSubscription?.cancel();
+    existingSocket?.destroy();
 
-    _socket = socket;
-    _connectedPeer = peerLabel;
-    _connectionState = TransferConnectionState.connected;
-    _statusMessage = 'Connecté à $peerLabel';
-    notifyListeners();
+    _peerSockets[peerLabel] = socket;
+    _connectedPeer = _peerSockets.keys.first;
+    _updateConnectionStatus();
 
-    _socketLineSubscription = socket
+    _peerLineSubscriptions[peerLabel] = socket
         .cast<List<int>>()
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen(
-          (line) => unawaited(_handleIncomingLine(line)),
+          (line) => unawaited(_handleIncomingLine(peerLabel, line)),
           onError: (Object error) {
             _appendHistory(
               direction: TransferDirection.system,
               status: TransferStatus.failed,
               title: 'Connexion',
-              message: 'Erreur socket: $error',
+              message: 'Erreur socket ($peerLabel): $error',
             );
-            unawaited(_onSocketDisconnected('Erreur socket: $error'));
+            unawaited(_onPeerDisconnected(peerLabel, 'Erreur socket: $error'));
           },
           onDone: () {
-            unawaited(_onSocketDisconnected('Pair déconnecté.'));
+            unawaited(_onPeerDisconnected(peerLabel, 'Pair déconnecté.'));
           },
           cancelOnError: true,
         );
 
-    await _sendMessage(socket, {'type': 'hello', 'device': 'AtaoQuiz'});
+    await _sendMessageToPeer(peerLabel, {
+      'type': 'hello',
+      'device': 'AtaoQuiz',
+    });
+
+    await _sendActiveLiveChallengeToNewPeer(peerLabel);
+    notifyListeners();
   }
 
-  Future<void> _onSocketDisconnected(String reason) async {
-    await _socketLineSubscription?.cancel();
-    _socketLineSubscription = null;
-    _socket?.destroy();
-    _socket = null;
-    _connectedPeer = null;
+  Future<void> _onPeerDisconnected(String peerLabel, String reason) async {
+    final subscription = _peerLineSubscriptions.remove(peerLabel);
+    await subscription?.cancel();
+    final socket = _peerSockets.remove(peerLabel);
+    socket?.destroy();
 
-    if (_serverSocket != null) {
-      _connectionState = TransferConnectionState.hosting;
-      _statusMessage =
-          'Pair déconnecté. Serveur toujours actif sur le port $_activePort.';
-    } else {
-      _connectionState = TransferConnectionState.disconnected;
-      _statusMessage = reason;
-    }
+    _connectedPeer = _peerSockets.isEmpty ? null : _peerSockets.keys.first;
+    _updateConnectionStatus(reasonIfNoServer: reason);
 
     _appendHistory(
       direction: TransferDirection.system,
       status: TransferStatus.info,
       title: 'Connexion',
-      message: reason,
+      message: '$peerLabel: $reason',
     );
     notifyListeners();
   }
 
-  Future<void> _handleIncomingLine(String line) async {
+  Future<void> _handleIncomingLine(String peerLabel, String line) async {
     if (line.trim().isEmpty) {
       return;
     }
@@ -474,7 +695,7 @@ class QuizTransferService extends ChangeNotifier {
         direction: TransferDirection.system,
         status: TransferStatus.failed,
         title: 'Réception',
-        message: 'Message invalide: $e',
+        message: 'Message invalide ($peerLabel): $e',
       );
       return;
     }
@@ -484,7 +705,7 @@ class QuizTransferService extends ChangeNotifier {
         direction: TransferDirection.system,
         status: TransferStatus.failed,
         title: 'Réception',
-        message: 'Protocole incompatible.',
+        message: 'Protocole incompatible depuis $peerLabel.',
       );
       return;
     }
@@ -492,7 +713,7 @@ class QuizTransferService extends ChangeNotifier {
     final type = envelope['type']?.toString();
     switch (type) {
       case 'hello':
-        _statusMessage = 'Connexion active avec le pair.';
+        _updateConnectionStatus();
         notifyListeners();
         return;
       case 'ack':
@@ -500,33 +721,41 @@ class QuizTransferService extends ChangeNotifier {
           direction: TransferDirection.system,
           status: TransferStatus.info,
           title: 'Accusé',
-          message: envelope['message']?.toString() ?? 'Accusé reçu.',
+          message:
+              '[$peerLabel] ${envelope['message']?.toString() ?? 'Accusé reçu.'}',
         );
         return;
       case 'quiz':
-        await _handleIncomingQuiz(envelope);
+        await _handleIncomingQuiz(peerLabel, envelope);
+        return;
+      case 'challenge_start':
+        await _handleIncomingChallengeStart(peerLabel, envelope);
+        return;
+      case 'challenge_result':
+        await _handleIncomingChallengeResult(peerLabel, envelope);
+        return;
+      case 'challenge_leaderboard':
+        await _handleIncomingChallengeLeaderboard(peerLabel, envelope);
         return;
       default:
         _appendHistory(
           direction: TransferDirection.system,
           status: TransferStatus.failed,
           title: 'Réception',
-          message: 'Type de message inconnu: $type',
+          message: 'Type inconnu depuis $peerLabel: $type',
         );
     }
   }
 
-  Future<void> _handleIncomingQuiz(Map<String, dynamic> envelope) async {
-    final socket = _socket;
-    if (socket == null) {
-      return;
-    }
-
+  Future<void> _handleIncomingQuiz(
+    String peerLabel,
+    Map<String, dynamic> envelope,
+  ) async {
     final transferId =
         envelope['transferId']?.toString() ?? _createTransferId();
     final quizRaw = envelope['quiz'];
     if (quizRaw is! Map<String, dynamic>) {
-      await _sendMessage(socket, {
+      await _sendMessageToPeer(peerLabel, {
         'type': 'ack',
         'transferId': transferId,
         'ok': false,
@@ -536,7 +765,7 @@ class QuizTransferService extends ChangeNotifier {
         direction: TransferDirection.received,
         status: TransferStatus.failed,
         title: 'Quiz invalide',
-        message: 'Payload quiz invalide.',
+        message: 'Payload quiz invalide depuis $peerLabel.',
       );
       return;
     }
@@ -546,7 +775,7 @@ class QuizTransferService extends ChangeNotifier {
       final preparedQuiz = await _prepareReceivedQuiz(incomingQuiz);
       await _storageService.saveQuiz(preparedQuiz);
 
-      await _sendMessage(socket, {
+      await _sendMessageToPeer(peerLabel, {
         'type': 'ack',
         'transferId': transferId,
         'ok': true,
@@ -557,13 +786,13 @@ class QuizTransferService extends ChangeNotifier {
         direction: TransferDirection.received,
         status: TransferStatus.success,
         title: preparedQuiz.title,
-        message: 'Quiz importé.',
+        message: 'Quiz importé depuis $peerLabel.',
         receivedQuizId: preparedQuiz.id,
       );
       _statusMessage = 'Quiz reçu: ${preparedQuiz.title}';
       notifyListeners();
     } catch (e) {
-      await _sendMessage(socket, {
+      await _sendMessageToPeer(peerLabel, {
         'type': 'ack',
         'transferId': transferId,
         'ok': false,
@@ -573,15 +802,214 @@ class QuizTransferService extends ChangeNotifier {
         direction: TransferDirection.received,
         status: TransferStatus.failed,
         title: 'Erreur import',
-        message: 'Impossible d\'importer le quiz: $e',
+        message: 'Impossible d\'importer le quiz depuis $peerLabel: $e',
       );
     }
   }
 
-  Future<void> _sendMessage(Socket socket, Map<String, dynamic> payload) async {
+  Future<void> _handleIncomingChallengeStart(
+    String peerLabel,
+    Map<String, dynamic> envelope,
+  ) async {
+    final networkSessionId = envelope['networkSessionId']?.toString() ?? '';
+    final sessionName =
+        envelope['sessionName']?.toString() ?? 'Challenge réseau';
+    final quizRaw = envelope['quiz'];
+    if (networkSessionId.isEmpty || quizRaw is! Map<String, dynamic>) {
+      _appendHistory(
+        direction: TransferDirection.system,
+        status: TransferStatus.failed,
+        title: 'Challenge',
+        message: 'Challenge réseau invalide reçu depuis $peerLabel.',
+      );
+      return;
+    }
+
+    try {
+      final incomingQuiz = Quiz.fromJson(quizRaw);
+      final preparedQuiz = await _prepareReceivedQuiz(incomingQuiz);
+      await _storageService.saveQuiz(preparedQuiz);
+
+      final session = await _challengeService.createOrGetNetworkSession(
+        networkSessionId: networkSessionId,
+        quiz: preparedQuiz,
+        sessionName: sessionName,
+      );
+
+      final startedAt =
+          DateTime.tryParse(envelope['startedAt']?.toString() ?? '') ??
+          DateTime.now();
+
+      _liveChallenges[networkSessionId] = LiveChallengeSessionState(
+        networkSessionId: networkSessionId,
+        name: session.name,
+        quizTitle: session.quizTitle,
+        questionCount: session.questionCount,
+        localSessionId: session.id,
+        localQuizId: preparedQuiz.id,
+        startedAt: startedAt,
+        startedLocally: false,
+        results: _liveChallenges[networkSessionId]?.results ?? const [],
+      );
+      _activeLiveChallengeId = networkSessionId;
+
+      await _sendMessageToPeer(peerLabel, {
+        'type': 'ack',
+        'ok': true,
+        'message': 'Challenge reçu: ${session.name}',
+      });
+
+      _appendHistory(
+        direction: TransferDirection.system,
+        status: TransferStatus.success,
+        title: 'Challenge',
+        message: 'Challenge réseau reçu: ${session.name}',
+      );
+      _statusMessage = 'Challenge reçu: ${session.name}';
+      notifyListeners();
+    } catch (e) {
+      await _sendMessageToPeer(peerLabel, {
+        'type': 'ack',
+        'ok': false,
+        'message': 'Erreur challenge_start: $e',
+      });
+      _appendHistory(
+        direction: TransferDirection.system,
+        status: TransferStatus.failed,
+        title: 'Challenge',
+        message: 'Erreur import challenge depuis $peerLabel: $e',
+      );
+    }
+  }
+
+  Future<void> _handleIncomingChallengeResult(
+    String peerLabel,
+    Map<String, dynamic> envelope,
+  ) async {
+    if (_serverSocket == null) {
+      return;
+    }
+
+    final networkSessionId = envelope['networkSessionId']?.toString() ?? '';
+    final resultRaw = envelope['result'];
+    if (networkSessionId.isEmpty || resultRaw is! Map<String, dynamic>) {
+      return;
+    }
+
+    final result = LiveChallengePlayerResult.fromJson(resultRaw);
+    _upsertLiveResult(networkSessionId, result);
+    await _persistLiveResult(networkSessionId, result);
+    await _broadcastLiveLeaderboard(networkSessionId);
+
+    _appendHistory(
+      direction: TransferDirection.system,
+      status: TransferStatus.info,
+      title: 'Challenge',
+      message:
+          'Résultat reçu de ${result.playerName} (${result.score}/${result.totalQuestions}).',
+    );
+    notifyListeners();
+  }
+
+  Future<void> _handleIncomingChallengeLeaderboard(
+    String peerLabel,
+    Map<String, dynamic> envelope,
+  ) async {
+    final networkSessionId = envelope['networkSessionId']?.toString() ?? '';
+    if (networkSessionId.isEmpty) {
+      return;
+    }
+
+    final resultsRaw = envelope['results'];
+    final parsedResults = <LiveChallengePlayerResult>[];
+    if (resultsRaw is List) {
+      for (final item in resultsRaw) {
+        if (item is Map<String, dynamic>) {
+          parsedResults.add(LiveChallengePlayerResult.fromJson(item));
+        } else if (item is Map) {
+          parsedResults.add(
+            LiveChallengePlayerResult.fromJson(Map<String, dynamic>.from(item)),
+          );
+        }
+      }
+    }
+
+    final existing = _liveChallenges[networkSessionId];
+    final startedAt =
+        DateTime.tryParse(envelope['startedAt']?.toString() ?? '') ??
+        existing?.startedAt ??
+        DateTime.now();
+
+    final merged = _mergeLiveResults(
+      existing?.results ?? const [],
+      parsedResults,
+    );
+    _liveChallenges[networkSessionId] = LiveChallengeSessionState(
+      networkSessionId: networkSessionId,
+      name:
+          envelope['sessionName']?.toString() ??
+          existing?.name ??
+          'Challenge réseau',
+      quizTitle:
+          envelope['quizTitle']?.toString() ?? existing?.quizTitle ?? 'Quiz',
+      questionCount:
+          int.tryParse('${envelope['questionCount']}') ??
+          existing?.questionCount ??
+          0,
+      localSessionId: existing?.localSessionId,
+      localQuizId: existing?.localQuizId,
+      startedAt: startedAt,
+      startedLocally: existing?.startedLocally ?? false,
+      results: _sortLiveResults(merged),
+    );
+    _activeLiveChallengeId = networkSessionId;
+
+    await _persistLiveLeaderboard(
+      networkSessionId,
+      _liveChallenges[networkSessionId]!.results,
+    );
+
+    _appendHistory(
+      direction: TransferDirection.system,
+      status: TransferStatus.info,
+      title: 'Challenge',
+      message: 'Classement challenge mis à jour depuis $peerLabel.',
+    );
+    notifyListeners();
+  }
+
+  Future<void> _sendMessageToPeer(
+    String peerLabel,
+    Map<String, dynamic> payload,
+  ) async {
+    final socket = _peerSockets[peerLabel];
+    if (socket == null) {
+      throw StateError('Pair déconnecté: $peerLabel');
+    }
     final envelope = {'protocol': _protocol, 'version': _version, ...payload};
     socket.add(utf8.encode('${jsonEncode(envelope)}\n'));
     await socket.flush();
+  }
+
+  Future<void> _sendMessageToAll(
+    Map<String, dynamic> payload, {
+    String? exceptPeerLabel,
+  }) async {
+    final peerLabels = _peerSockets.keys.toList(growable: false);
+    if (peerLabels.isEmpty) {
+      throw StateError('Aucun pair connecté.');
+    }
+
+    for (final peerLabel in peerLabels) {
+      if (exceptPeerLabel != null && peerLabel == exceptPeerLabel) {
+        continue;
+      }
+      try {
+        await _sendMessageToPeer(peerLabel, payload);
+      } catch (e) {
+        await _onPeerDisconnected(peerLabel, 'Envoi impossible: $e');
+      }
+    }
   }
 
   Future<Quiz> _prepareReceivedQuiz(Quiz incomingQuiz) async {
@@ -636,6 +1064,233 @@ class QuizTransferService extends ChangeNotifier {
     );
   }
 
+  void _upsertLiveResult(
+    String networkSessionId,
+    LiveChallengePlayerResult incoming,
+  ) {
+    final existing = _liveChallenges[networkSessionId];
+    final merged = _mergeLiveResults(existing?.results ?? const [], [incoming]);
+
+    _liveChallenges[networkSessionId] = LiveChallengeSessionState(
+      networkSessionId: networkSessionId,
+      name: existing?.name ?? 'Challenge réseau',
+      quizTitle: existing?.quizTitle ?? 'Quiz',
+      questionCount: existing?.questionCount ?? incoming.totalQuestions,
+      localSessionId: existing?.localSessionId,
+      localQuizId: existing?.localQuizId,
+      startedAt: existing?.startedAt ?? DateTime.now(),
+      startedLocally: existing?.startedLocally ?? false,
+      results: _sortLiveResults(merged),
+    );
+    _activeLiveChallengeId = networkSessionId;
+  }
+
+  List<LiveChallengePlayerResult> _mergeLiveResults(
+    List<LiveChallengePlayerResult> current,
+    List<LiveChallengePlayerResult> incoming,
+  ) {
+    final byPlayer = <String, LiveChallengePlayerResult>{};
+    for (final item in current) {
+      byPlayer[_playerKey(item.playerName)] = item;
+    }
+    for (final item in incoming) {
+      final key = _playerKey(item.playerName);
+      final existing = byPlayer[key];
+      if (existing == null || _isBetterLiveResult(item, existing)) {
+        byPlayer[key] = item;
+      }
+    }
+    return byPlayer.values.toList();
+  }
+
+  List<LiveChallengePlayerResult> _sortLiveResults(
+    List<LiveChallengePlayerResult> results,
+  ) {
+    final sorted = List<LiveChallengePlayerResult>.from(results)
+      ..sort((a, b) {
+        final byScore = b.score.compareTo(a.score);
+        if (byScore != 0) {
+          return byScore;
+        }
+        final byDuration = a.completionDurationMs.compareTo(
+          b.completionDurationMs,
+        );
+        if (byDuration != 0) {
+          return byDuration;
+        }
+        final byCompletedAt = a.completedAt.compareTo(b.completedAt);
+        if (byCompletedAt != 0) {
+          return byCompletedAt;
+        }
+        return a.playerName.toLowerCase().compareTo(b.playerName.toLowerCase());
+      });
+    return sorted;
+  }
+
+  bool _isBetterLiveResult(
+    LiveChallengePlayerResult candidate,
+    LiveChallengePlayerResult current,
+  ) {
+    if (candidate.score != current.score) {
+      return candidate.score > current.score;
+    }
+    if (candidate.completionDurationMs != current.completionDurationMs) {
+      return candidate.completionDurationMs < current.completionDurationMs;
+    }
+    return candidate.completedAt.isBefore(current.completedAt);
+  }
+
+  Future<void> _persistLiveResult(
+    String networkSessionId,
+    LiveChallengePlayerResult result,
+  ) async {
+    final state = _liveChallenges[networkSessionId];
+    try {
+      if (state?.localSessionId != null) {
+        await _challengeService.upsertAttemptBySessionId(
+          sessionId: state!.localSessionId!,
+          participantName: result.playerName,
+          score: result.score,
+          totalQuestions: result.totalQuestions,
+          completionDurationMs: result.completionDurationMs,
+          completedAt: result.completedAt,
+        );
+      } else {
+        await _challengeService.upsertAttemptByNetworkSessionId(
+          networkSessionId: networkSessionId,
+          participantName: result.playerName,
+          score: result.score,
+          totalQuestions: result.totalQuestions,
+          completionDurationMs: result.completionDurationMs,
+          completedAt: result.completedAt,
+        );
+      }
+    } catch (e) {
+      _appendHistory(
+        direction: TransferDirection.system,
+        status: TransferStatus.failed,
+        title: 'Challenge',
+        message: 'Erreur persistance score challenge: $e',
+      );
+    }
+  }
+
+  Future<void> _persistLiveLeaderboard(
+    String networkSessionId,
+    List<LiveChallengePlayerResult> results,
+  ) async {
+    for (final result in results) {
+      await _persistLiveResult(networkSessionId, result);
+    }
+  }
+
+  Future<void> _broadcastLiveLeaderboard(String networkSessionId) async {
+    final state = _liveChallenges[networkSessionId];
+    if (state == null) {
+      return;
+    }
+
+    final sorted = _sortLiveResults(state.results);
+    _liveChallenges[networkSessionId] = state.copyWith(results: sorted);
+
+    await _sendMessageToAll({
+      'type': 'challenge_leaderboard',
+      'networkSessionId': networkSessionId,
+      'sessionName': state.name,
+      'quizTitle': state.quizTitle,
+      'questionCount': state.questionCount,
+      'startedAt': state.startedAt.toIso8601String(),
+      'results': sorted.map((item) => item.toJson()).toList(),
+    });
+  }
+
+  Future<void> _sendActiveLiveChallengeToNewPeer(String peerLabel) async {
+    if (_serverSocket == null) {
+      return;
+    }
+
+    final activeId = _activeLiveChallengeId;
+    if (activeId == null) {
+      return;
+    }
+
+    final active = _liveChallenges[activeId];
+    if (active == null || !active.startedLocally) {
+      return;
+    }
+
+    final localQuizId = active.localQuizId;
+    if (localQuizId == null) {
+      return;
+    }
+
+    final quizzes = await _storageService.getQuizzes();
+    Quiz? quiz;
+    for (final item in quizzes) {
+      if (item.id == localQuizId) {
+        quiz = item;
+        break;
+      }
+    }
+    if (quiz == null) {
+      return;
+    }
+
+    final cleanQuiz = _sanitizeOutgoingQuiz(quiz);
+    await _sendMessageToPeer(peerLabel, {
+      'type': 'challenge_start',
+      'networkSessionId': active.networkSessionId,
+      'sessionName': active.name,
+      'quizTitle': active.quizTitle,
+      'questionCount': active.questionCount,
+      'hostPlayerName': 'Hôte',
+      'startedAt': active.startedAt.toIso8601String(),
+      'quiz': cleanQuiz.toJson(),
+    });
+
+    if (active.results.isEmpty) {
+      return;
+    }
+
+    final sorted = _sortLiveResults(active.results);
+    await _sendMessageToPeer(peerLabel, {
+      'type': 'challenge_leaderboard',
+      'networkSessionId': active.networkSessionId,
+      'sessionName': active.name,
+      'quizTitle': active.quizTitle,
+      'questionCount': active.questionCount,
+      'startedAt': active.startedAt.toIso8601String(),
+      'results': sorted.map((item) => item.toJson()).toList(),
+    });
+  }
+
+  void _updateConnectionStatus({String? reasonIfNoServer}) {
+    if (_peerSockets.isNotEmpty) {
+      _connectionState = TransferConnectionState.connected;
+      _connectedPeer = _peerSockets.keys.first;
+      if (_serverSocket != null) {
+        _statusMessage =
+            'Serveur actif sur le port $_activePort • ${_peerSockets.length} pair(s) connecté(s).';
+      } else {
+        _statusMessage = _peerSockets.length == 1
+            ? 'Connecté à ${_connectedPeer ?? 'pair'}'
+            : '${_peerSockets.length} pairs connectés.';
+      }
+      return;
+    }
+
+    _connectedPeer = null;
+    if (_serverSocket != null) {
+      _connectionState = TransferConnectionState.hosting;
+      _statusMessage =
+          'Serveur actif sur le port $_activePort. En attente d\'un pair.';
+      return;
+    }
+
+    _connectionState = TransferConnectionState.disconnected;
+    _statusMessage = reasonIfNoServer ?? 'Aucune connexion active.';
+  }
+
   void _appendHistory({
     required TransferDirection direction,
     required TransferStatus status,
@@ -659,7 +1314,14 @@ class QuizTransferService extends ChangeNotifier {
     if (_history.length > _maxHistoryItems) {
       _history.removeRange(_maxHistoryItems, _history.length);
     }
-    notifyListeners();
+  }
+
+  String _playerKey(String name) => name.trim().toLowerCase();
+
+  String _createNetworkChallengeId() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final random = _random.nextInt(900000) + 100000;
+    return 'net_$now$random';
   }
 
   String _createTransferId() {

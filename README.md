@@ -39,11 +39,14 @@ AtaoQuiz vise à centraliser l'expérience d'apprentissage dans une seule applic
 6. Authentification système Android (biométrie + verrou appareil)
 7. Reverrouillage automatique au retour depuis l'arrière-plan
 8. Détection de changement de configuration de sécurité Android
-9. Transfert local de quiz entre deux téléphones (QR code ou IP/port)
+9. Transfert local de quiz entre téléphones (QR code ou IP/port)
+10. Challenges locaux (score puis vitesse de fin pour départager)
+11. Challenges réseau Wi-Fi multi-téléphones (session live + classement en direct)
+12. Classement global avec système de points, victoires et niveaux
 
 ### 3.2 Fonctionnalités en préparation
 1. Durcissement sécurité du transfert local (authentification/chiffrement)
-2. Compétition locale entre utilisateurs
+2. Lobby challenge (état prêt/pas prêt, démarrage synchronisé)
 3. Synchronisation cloud (ex: Firebase)
 
 ## 4. Architecture du code
@@ -65,6 +68,11 @@ lib/
       first_time_setup_screen.dart
       system_auth_screen.dart
       system_auth_manage_screen.dart
+    challenge/
+      challenge_center_screen.dart
+      challenge_sessions_screen.dart
+      challenge_detail_screen.dart
+      leaderboard_screen.dart
     generatequiz/
       generate_quiz_screen.dart
       quiz_list_screen.dart
@@ -77,7 +85,9 @@ lib/
     settings_screen.dart
     splash_screen.dart
   services/
+    challenge_service.dart
     gemini_service.dart
+    quiz_transfer_service.dart
     storage_service.dart
     system_auth_service.dart
   theme/
@@ -89,6 +99,8 @@ lib/
 - `lib/services/system_auth_service.dart`: logique d'authentification locale
 - `lib/services/gemini_service.dart`: appel API Gemini pour générer le contenu quiz
 - `lib/services/storage_service.dart`: persistance locale des quiz/résultats
+- `lib/services/quiz_transfer_service.dart`: transfert Wi-Fi, sockets TCP, challenge live réseau
+- `lib/services/challenge_service.dart`: logique de challenge, points, niveaux, classement
 
 ## 5. Stack technique
 - Flutter / Dart
@@ -97,6 +109,7 @@ lib/
 - `pdfx` et `flutter_pdfview` pour PDF
 - `http` pour l'appel API Gemini
 - `flutter_dotenv` pour la clé API
+- `qr_flutter` + `mobile_scanner` pour QR et connexion entre appareils
 
 ## 6. Installation et démarrage
 
@@ -145,6 +158,7 @@ flutter build apk --debug
 ## 10. Documentation complémentaire
 - `AUTH_SYSTEM_DOCUMENTATION.md`
 - `AUTHENTICATION_SYSTEM.md`
-- `README_TRANSFERT_QUIZ.md`
+- `README_TRANSFERT_QUIZ.md` (transfert local QR/IP, sockets, Android)
+- `README_CLASSEMENT_CHALLENGE.md` (classement, challenge local/reseau, points et niveaux)
 
-Ces documents détaillent l'architecture auth, les flux de sécurité, le transfert local de quiz et les configurations Android requises.
+Ces documents détaillent l'architecture auth, les flux de sécurité, le transfert local, le système de classement/challenge et les configurations Android requises.

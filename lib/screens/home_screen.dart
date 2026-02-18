@@ -1,4 +1,5 @@
 import 'package:atao_quiz/components/home_components.dart';
+import 'package:atao_quiz/screens/challenge/challenge_center_screen.dart';
 import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
 import 'package:atao_quiz/screens/pdf/pdf_list_screen.dart';
 import 'package:atao_quiz/screens/profile_screen.dart';
@@ -168,14 +169,30 @@ class HomeScreen extends StatelessWidget {
               title: "Classement & Challenge",
               subtitle: "Faites des quiz contre vos amis",
               imagePath: "assets/illustrations/competition.png",
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const ChallengeCenterScreen(initialTabIndex: 0),
+                  ),
+                );
+              },
             ),
 
             HomeSectionCard(
               title: "Mes Scores",
               subtitle: "Gagnez des trophées et progressez !",
               imagePath: "assets/illustrations/trophy_success.png",
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const ChallengeCenterScreen(initialTabIndex: 1),
+                  ),
+                );
+              },
             ),
 
             const SizedBox(height: 11),

@@ -250,13 +250,15 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Une fois connectés, les deux téléphones peuvent envoyer et recevoir.',
+                'Une fois connectés, les téléphones peuvent envoyer et recevoir.',
                 style: TextStyle(color: secondaryTextColor, fontSize: 12),
               ),
-              if (_transferService.connectedPeer != null) ...[
+              if (_transferService.connectedPeersCount > 0) ...[
                 const SizedBox(height: 6),
                 Text(
-                  'Pair: ${_transferService.connectedPeer}',
+                  _transferService.connectedPeersCount == 1
+                      ? 'Pair: ${_transferService.connectedPeer}'
+                      : 'Pairs: ${_transferService.connectedPeers.join(' | ')}',
                   style: TextStyle(color: secondaryTextColor, fontSize: 12),
                 ),
               ],

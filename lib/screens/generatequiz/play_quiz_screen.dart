@@ -2,10 +2,38 @@ import 'package:atao_quiz/services/storage_service.dart';
 import 'package:atao_quiz/theme/colors.dart';
 import 'package:flutter/material.dart';
 
+class QuizPlayResult {
+  final int score;
+  final int totalQuestions;
+  final int completionDurationMs;
+  final DateTime completedAt;
+
+  const QuizPlayResult({
+    required this.score,
+    required this.totalQuestions,
+    required this.completionDurationMs,
+    required this.completedAt,
+  });
+
+  double get successRate {
+    if (totalQuestions <= 0) {
+      return 0;
+    }
+    return score / totalQuestions;
+  }
+}
+
 class PlayQuizScreen extends StatefulWidget {
   final Quiz quiz;
+  final bool persistResult;
+  final ValueChanged<QuizPlayResult>? onCompleted;
 
-  const PlayQuizScreen({super.key, required this.quiz});
+  const PlayQuizScreen({
+    super.key,
+    required this.quiz,
+    this.persistResult = true,
+    this.onCompleted,
+  });
 
   @override
   State<PlayQuizScreen> createState() => _PlayQuizScreenState();
@@ -14,12 +42,14 @@ class PlayQuizScreen extends StatefulWidget {
 class _PlayQuizScreenState extends State<PlayQuizScreen> {
   late final List<Question> _questions;
   late final List<int?> _selectedAnswers;
+  late final DateTime _startedAt;
 
   int _currentQuestionIndex = 0;
   bool _quizCompleted = false;
   bool _selectionLocked = false;
   bool _resultSaved = false;
   bool _isSavingResult = false;
+  bool _completionReported = false;
 
   int get _totalQuestions => _questions.length;
 
@@ -59,6 +89,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
         .toList();
 
     _selectedAnswers = List<int?>.filled(_questions.length, null);
+    _startedAt = DateTime.now();
   }
 
   Future<void> _selectAnswer(int optionIndex) async {
@@ -89,6 +120,7 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
         _selectionLocked = false;
       });
       await _saveQuizResult();
+      _notifyCompletionIfNeeded();
       return;
     }
 
@@ -100,6 +132,11 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
 
   Future<void> _saveQuizResult() async {
     if (_resultSaved || _isSavingResult) {
+      return;
+    }
+
+    if (!widget.persistResult) {
+      _resultSaved = true;
       return;
     }
 
@@ -117,6 +154,23 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
         });
       }
     }
+  }
+
+  void _notifyCompletionIfNeeded() {
+    if (_completionReported) {
+      return;
+    }
+    _completionReported = true;
+    final now = DateTime.now();
+    final durationMs = now.difference(_startedAt).inMilliseconds;
+    widget.onCompleted?.call(
+      QuizPlayResult(
+        score: _score,
+        totalQuestions: _totalQuestions,
+        completionDurationMs: durationMs < 0 ? 0 : durationMs,
+        completedAt: now,
+      ),
+    );
   }
 
   void _goToQuestion(int index) {
@@ -137,7 +191,11 @@ class _PlayQuizScreenState extends State<PlayQuizScreen> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (context) => PlayQuizScreen(quiz: widget.quiz),
+        builder: (context) => PlayQuizScreen(
+          quiz: widget.quiz,
+          persistResult: widget.persistResult,
+          onCompleted: widget.onCompleted,
+        ),
       ),
     );
   }

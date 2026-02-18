@@ -1,6 +1,7 @@
 import 'package:atao_quiz/screens/authentication/first_time_setup_screen.dart';
 import 'package:atao_quiz/screens/authentication/system_auth_screen.dart';
 import 'package:atao_quiz/screens/authentication/system_auth_manage_screen.dart';
+import 'package:atao_quiz/screens/challenge/challenge_center_screen.dart';
 import 'package:atao_quiz/screens/generatequiz/generate_quiz_screen.dart';
 import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
 import 'package:atao_quiz/screens/home_screen.dart';
@@ -168,6 +169,7 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> with WidgetsBindingObserver {
         '/quiz-list': (context) => const QuizListScreen(),
         '/generate-quiz': (context) => const GenerateQuizScreen(),
         '/transfer-quiz': (context) => const TransferQuizScreen(),
+        '/challenge-center': (context) => const ChallengeCenterScreen(),
       },
     );
   }

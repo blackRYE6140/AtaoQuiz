@@ -1,3 +1,4 @@
+import 'package:atao_quiz/components/profile_avatar.dart';
 import 'package:atao_quiz/components/home_components.dart';
 import 'package:atao_quiz/screens/challenge/challenge_center_screen.dart';
 import 'package:atao_quiz/screens/generatequiz/quiz_list_screen.dart';
@@ -6,14 +7,62 @@ import 'package:atao_quiz/screens/profile_screen.dart';
 import 'package:atao_quiz/screens/scores/my_scores_screen.dart';
 import 'package:atao_quiz/screens/settings_screen.dart';
 import 'package:atao_quiz/screens/transfer_quiz/transfer_quiz_screen.dart';
+import 'package:atao_quiz/services/user_profile_service.dart';
 import 'package:flutter/material.dart';
 import 'package:atao_quiz/theme/colors.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   final Function(ThemeMode)? onThemeModeChanged;
   final ThemeMode? currentThemeMode;
 
   const HomeScreen({super.key, this.onThemeModeChanged, this.currentThemeMode});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final UserProfileService _profileService = UserProfileService();
+  UserProfile _profile = const UserProfile(
+    displayName: UserProfileService.defaultDisplayName,
+    avatarIndex: 0,
+    isConfigured: false,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _profileService.addListener(_onProfileChanged);
+    _loadProfile();
+  }
+
+  @override
+  void dispose() {
+    _profileService.removeListener(_onProfileChanged);
+    super.dispose();
+  }
+
+  Future<void> _loadProfile() async {
+    final loaded = await _profileService.getProfile();
+    if (!mounted) {
+      return;
+    }
+    setState(() => _profile = loaded);
+  }
+
+  void _onProfileChanged() {
+    if (!mounted) {
+      return;
+    }
+    final next = _profileService.profileOrDefault;
+    if (next.displayName == _profile.displayName &&
+        next.avatarIndex == _profile.avatarIndex &&
+        next.profileImageBase64 == _profile.profileImageBase64 &&
+        next.isConfigured == _profile.isConfigured) {
+      return;
+    }
+    setState(() => _profile = next);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,12 +92,15 @@ class HomeScreen extends StatelessWidget {
         ),
         leadingWidth: 128,
         actions: [
-          //  Profile icon
           IconButton(
-            icon: Icon(
-              Icons.account_circle,
-              color: isDark ? AppColors.accentYellow : AppColors.primaryBlue,
-              size: 28,
+            icon: ProfileAvatar(
+              avatarIndex: _profile.avatarIndex,
+              imageBase64: _profile.profileImageBase64,
+              radius: 14,
+              accentColor: isDark
+                  ? AppColors.accentYellow
+                  : AppColors.primaryBlue,
+              borderWidth: 1.4,
             ),
             onPressed: () {
               Navigator.push(
@@ -58,7 +110,6 @@ class HomeScreen extends StatelessWidget {
             },
           ),
 
-          // ☰ Menu icon (settings)
           IconButton(
             icon: Icon(
               Icons.menu,
@@ -66,13 +117,12 @@ class HomeScreen extends StatelessWidget {
               size: 28,
             ),
             onPressed: () {
-              // Dans la navigation vers SettingsScreen
               Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => SettingsScreen(
-                    onThemeModeChanged: onThemeModeChanged,
-                    currentThemeMode: currentThemeMode,
+                    onThemeModeChanged: widget.onThemeModeChanged,
+                    currentThemeMode: widget.currentThemeMode,
                   ),
                 ),
               );

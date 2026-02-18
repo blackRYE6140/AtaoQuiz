@@ -82,6 +82,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
     final next = _profileService.profileOrDefault;
     if (next.displayName == _profile.displayName &&
         next.avatarIndex == _profile.avatarIndex &&
+        next.profileImageBase64 == _profile.profileImageBase64 &&
         next.isConfigured == _profile.isConfigured) {
       return;
     }
@@ -206,6 +207,8 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
         session: session,
         quiz: quiz,
         hostPlayerName: localName,
+        hostAvatarIndex: _profile.avatarIndex,
+        hostProfileImageBase64: _profile.profileImageBase64,
       );
       await _loadSession();
       if (!mounted) {
@@ -495,6 +498,8 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                   _transferService.submitLiveChallengeResult(
                     networkSessionId: networkSessionId,
                     participantName: participant,
+                    participantAvatarIndex: _profile.avatarIndex,
+                    participantProfileImageBase64: _profile.profileImageBase64,
                     score: result.score,
                     totalQuestions: result.totalQuestions,
                     completionDurationMs: result.completionDurationMs,
@@ -801,6 +806,9 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
     final isNetworkRun =
         networkSessionId != null && _transferService.isConnected;
     final isNetworkHost = isNetworkRun && _transferService.isHosting;
+    final liveSessionState = networkSessionId == null
+        ? null
+        : _transferService.getLiveChallengeByNetworkId(networkSessionId);
     final pendingRound = _pendingRoundPlan;
     final isPendingRoundFresh =
         pendingRound != null && _isRoundPlanFresh(pendingRound);
@@ -812,6 +820,16 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
         ? const <LiveChallengePlayerResult>[]
         : _transferService.getRankedResultsForNetworkSession(networkSessionId);
     final rankedLocal = _challengeService.rankAttempts(session);
+    final localProfileKey = _profile.displayName.trim().toLowerCase();
+    final hasLocalResultInHistory = rankedLocal.any(
+      (attempt) =>
+          attempt.participantName.trim().toLowerCase() == localProfileKey,
+    );
+    final hasLocalResultInLive = liveResults.any(
+      (result) => result.playerName.trim().toLowerCase() == localProfileKey,
+    );
+    final isChallengeFinishedForLocal =
+        isNetworkRun && (hasLocalResultInHistory || hasLocalResultInLive);
     final useLiveResults = liveResults.isNotEmpty;
     final modeLabel = session.isTimed
         ? 'Challenge avec le temps (${_formatDurationFromSeconds(session.timeLimitSeconds ?? 0)})'
@@ -823,14 +841,15 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
         _transferService.connectedPeersCount > 0 &&
         networkSessionId == null;
 
-    final playLabelBase = isNetworkRun
-        ? isNetworkHost
-              ? 'Jouer et publier score réseau'
-              : 'En attente du créateur'
-        : 'Jouer ce challenge';
-    final playLabel = !isNetworkRun && session.isTimed
-        ? '$playLabelBase (${_formatDurationFromSeconds(session.timeLimitSeconds ?? 0)})'
-        : playLabelBase;
+    final playLabel = isChallengeFinishedForLocal
+        ? 'Challenge terminé'
+        : !isNetworkRun
+        ? session.isTimed
+              ? 'Jouer ce challenge (${_formatDurationFromSeconds(session.timeLimitSeconds ?? 0)})'
+              : 'Jouer ce challenge'
+        : isNetworkHost
+        ? 'Jouer et publier score réseau'
+        : 'En attente du créateur';
 
     return Scaffold(
       backgroundColor: isDark
@@ -949,6 +968,32 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                     'Pairs connectés: ${_transferService.connectedPeersCount}',
                     style: TextStyle(color: secondaryTextColor, fontSize: 12),
                   ),
+                  if (networkSessionId != null && liveSessionState != null) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        ProfileAvatar(
+                          avatarIndex: liveSessionState.hostAvatarIndex ?? 0,
+                          imageBase64: liveSessionState.hostProfileImageBase64,
+                          radius: 16,
+                          accentColor: primaryColor,
+                          borderWidth: 1.5,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Hôte: ${liveSessionState.hostPlayerName}',
+                            style: TextStyle(
+                              color: textColor,
+                              fontFamily: 'Poppins',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   if (networkSessionId == null)
                     SizedBox(
@@ -997,6 +1042,7 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                     children: [
                       ProfileAvatar(
                         avatarIndex: _profile.avatarIndex,
+                        imageBase64: _profile.profileImageBase64,
                         radius: 16,
                         accentColor: primaryColor,
                       ),
@@ -1023,23 +1069,69 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed:
-                          !_isLaunchingQuiz && (!isNetworkRun || isNetworkHost)
-                          ? _onPlayPressed
-                          : null,
-                      icon: _isLaunchingQuiz
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.play_arrow),
-                      label: Text(playLabel),
+                  if (!isNetworkRun && !session.isTimed)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: primaryColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: primaryColor.withValues(alpha: 0.24),
+                        ),
+                      ),
+                      child: Text(
+                        'Le bouton local "Jouer ce challenge" est désactivé. '
+                        'L\'hôte doit lancer "Lancer challenge Wi-Fi" pour démarrer.',
+                        style: TextStyle(
+                          color: secondaryTextColor,
+                          fontFamily: 'Poppins',
+                          fontSize: 12,
+                        ),
+                      ),
+                    )
+                  else if (isChallengeFinishedForLocal)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.success.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: AppColors.success.withValues(alpha: 0.30),
+                        ),
+                      ),
+                      child: Text(
+                        'Challenge déjà terminé pour vous. '
+                        'Le bouton "Jouer et publier score réseau" est retiré.',
+                        style: TextStyle(
+                          color: textColor,
+                          fontFamily: 'Poppins',
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    )
+                  else
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: !_isLaunchingQuiz &&
+                                (!isNetworkRun || isNetworkHost)
+                            ? _onPlayPressed
+                            : null,
+                        icon: _isLaunchingQuiz
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.play_arrow),
+                        label: Text(playLabel),
+                      ),
                     ),
-                  ),
                   if (isNetworkRun) ...[
                     const SizedBox(height: 10),
                     Container(
@@ -1161,6 +1253,13 @@ class _ChallengeDetailScreenState extends State<ChallengeDetailScreen> {
                       '${result.score}/${result.totalQuestions} • $percent% • Temps: ${_formatDuration(result.completionDurationMs)}\n'
                       '${_formatDate(result.completedAt)}',
                       style: TextStyle(color: secondaryTextColor, fontSize: 12),
+                    ),
+                    trailing: ProfileAvatar(
+                      avatarIndex: result.avatarIndex ?? 0,
+                      imageBase64: result.profileImageBase64,
+                      radius: 16,
+                      accentColor: primaryColor,
+                      borderWidth: 1.4,
                     ),
                     isThreeLine: true,
                   ),

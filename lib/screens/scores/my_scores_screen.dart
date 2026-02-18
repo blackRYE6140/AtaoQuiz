@@ -208,6 +208,7 @@ class _MyScoresScreenState extends State<MyScoresScreen> {
                             children: [
                               ProfileAvatar(
                                 avatarIndex: _profile.avatarIndex,
+                                imageBase64: _profile.profileImageBase64,
                                 radius: 18,
                                 accentColor: primaryColor,
                               ),

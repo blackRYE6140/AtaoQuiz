@@ -256,6 +256,7 @@ class ChallengeService {
     await _profileService.saveProfile(
       displayName: value,
       avatarIndex: profile.avatarIndex,
+      profileImageBase64: profile.profileImageBase64,
       markConfigured: profile.isConfigured,
     );
   }

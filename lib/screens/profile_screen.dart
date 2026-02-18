@@ -1,8 +1,15 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:atao_quiz/components/profile_avatar.dart';
 import 'package:atao_quiz/services/challenge_service.dart';
 import 'package:atao_quiz/services/storage_service.dart';
 import 'package:atao_quiz/services/user_profile_service.dart';
 import 'package:atao_quiz/theme/colors.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -15,6 +22,10 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  static const int _maxUploadBytes = 5 * 1024 * 1024;
+  static const int _maxStoredAvatarBytes = 220 * 1024;
+  static const List<int> _avatarTargetSizes = [512, 420, 360, 300, 256, 220];
+
   final UserProfileService _profileService = UserProfileService();
   final ChallengeService _challengeService = ChallengeService();
   final StorageService _storageService = StorageService();
@@ -54,6 +65,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final nextProfile = _profileService.profileOrDefault;
     if (nextProfile.displayName == _profile.displayName &&
         nextProfile.avatarIndex == _profile.avatarIndex &&
+        nextProfile.profileImageBase64 == _profile.profileImageBase64 &&
         nextProfile.isConfigured == _profile.isConfigured) {
       return;
     }
@@ -131,6 +143,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await _profileService.saveProfile(
         displayName: normalizedName,
         avatarIndex: _profile.avatarIndex,
+        profileImageBase64: _profile.profileImageBase64,
+        clearProfileImage: _profile.profileImageBase64 == null,
         markConfigured: true,
       );
 
@@ -159,7 +173,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _pickAvatar(Color primaryColor, bool isDark) async {
-    final selected = await showModalBottomSheet<int>(
+    final selected = await showModalBottomSheet<_AvatarPickerAction>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
@@ -183,6 +197,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(
+                    sheetContext,
+                    const _AvatarPickerAction(importImage: true),
+                  );
+                },
+                icon: const Icon(Icons.file_upload_outlined),
+                label: const Text('Importer une image (max 5 Mo)'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: primaryColor,
+                  side: BorderSide(color: primaryColor.withValues(alpha: 0.35)),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Recadrage automatique centré (avatar tête) • taille optimisée <= 220 Ko.',
+                style: TextStyle(
+                  color: isDark
+                      ? AppColors.darkTextSecondary
+                      : AppColors.lightTextSecondary,
+                  fontFamily: 'Poppins',
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 10),
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -198,7 +238,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   final option = profileAvatarByIndex(index);
                   return InkWell(
                     borderRadius: BorderRadius.circular(12),
-                    onTap: () => Navigator.pop(sheetContext, index),
+                    onTap: () => Navigator.pop(
+                      sheetContext,
+                      _AvatarPickerAction(avatarIndex: index),
+                    ),
                     child: Container(
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(12),
@@ -246,13 +289,141 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (selected == null || !mounted) {
       return;
     }
+
+    if (selected.importImage) {
+      await _importProfileImage();
+      return;
+    }
+
+    if (selected.avatarIndex == null) {
+      return;
+    }
+
     setState(() {
       _profile = UserProfile(
         displayName: _profile.displayName,
-        avatarIndex: selected,
+        avatarIndex: selected.avatarIndex!,
+        profileImageBase64: null,
         isConfigured: _profile.isConfigured,
       );
     });
+  }
+
+  Future<void> _importProfileImage() async {
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+      if (picked == null || picked.files.isEmpty) {
+        return;
+      }
+
+      final rawBytes = await _resolvePickedBytes(picked.files.single);
+      if (rawBytes == null || rawBytes.isEmpty) {
+        _showMessage('Image invalide.', isError: true);
+        return;
+      }
+      if (rawBytes.length > _maxUploadBytes) {
+        _showMessage(
+          'Image trop lourde (${(rawBytes.length / (1024 * 1024)).toStringAsFixed(1)} Mo). Max: 5 Mo.',
+          isError: true,
+        );
+        return;
+      }
+
+      final processed = await _cropAndOptimizeAvatar(rawBytes);
+      if (processed == null) {
+        _showMessage(
+          'Impossible de préparer l\'image. Essayez une photo plus légère.',
+          isError: true,
+        );
+        return;
+      }
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _profile = UserProfile(
+          displayName: _profile.displayName,
+          avatarIndex: _profile.avatarIndex,
+          profileImageBase64: base64Encode(processed),
+          isConfigured: _profile.isConfigured,
+        );
+      });
+      _showMessage('Photo de profil importée.');
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage('Import impossible: $e', isError: true);
+    }
+  }
+
+  Future<Uint8List?> _resolvePickedBytes(PlatformFile file) async {
+    final fromPicker = file.bytes;
+    if (fromPicker != null && fromPicker.isNotEmpty) {
+      return fromPicker;
+    }
+    final path = file.path;
+    if (path == null || path.trim().isEmpty) {
+      return null;
+    }
+    final localFile = File(path);
+    if (!await localFile.exists()) {
+      return null;
+    }
+    return localFile.readAsBytes();
+  }
+
+  Future<Uint8List?> _cropAndOptimizeAvatar(Uint8List sourceBytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(sourceBytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final sourceSize = math.min(image.width, image.height).toDouble();
+      final sourceRect = Rect.fromLTWH(
+        (image.width - sourceSize) / 2,
+        (image.height - sourceSize) / 2,
+        sourceSize,
+        sourceSize,
+      );
+
+      for (final targetSize in _avatarTargetSizes) {
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder);
+        final destinationRect = Rect.fromLTWH(
+          0,
+          0,
+          targetSize.toDouble(),
+          targetSize.toDouble(),
+        );
+
+        canvas.drawImageRect(
+          image,
+          sourceRect,
+          destinationRect,
+          Paint()..filterQuality = FilterQuality.high,
+        );
+        final picture = recorder.endRecording();
+        final rendered = await picture.toImage(targetSize, targetSize);
+        final pngData = await rendered.toByteData(
+          format: ui.ImageByteFormat.png,
+        );
+        if (pngData == null) {
+          continue;
+        }
+        final encoded = pngData.buffer.asUint8List();
+        if (encoded.length <= _maxStoredAvatarBytes) {
+          return encoded;
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   void _showMessage(String message, {bool isError = false}) {
@@ -340,6 +511,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             children: [
                               ProfileAvatar(
                                 avatarIndex: _profile.avatarIndex,
+                                imageBase64: _profile.profileImageBase64,
                                 radius: 52,
                                 accentColor: primaryColor,
                                 borderWidth: 2.4,
@@ -508,4 +680,11 @@ class _StatRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class _AvatarPickerAction {
+  final int? avatarIndex;
+  final bool importImage;
+
+  const _AvatarPickerAction({this.avatarIndex, this.importImage = false});
 }

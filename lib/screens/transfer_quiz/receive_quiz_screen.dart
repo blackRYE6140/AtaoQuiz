@@ -285,6 +285,11 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
                 'Une fois connectés, les téléphones peuvent envoyer et recevoir.',
                 style: TextStyle(color: secondaryTextColor, fontSize: 12),
               ),
+              const SizedBox(height: 4),
+              Text(
+                'Challenge: seul le téléphone hôte (celui qui affiche le QR) crée et démarre le Défi entre amis.',
+                style: TextStyle(color: secondaryTextColor, fontSize: 12),
+              ),
               if (_transferService.connectedPeersCount > 0) ...[
                 const SizedBox(height: 6),
                 Text(
@@ -346,6 +351,11 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
                   color: textColor,
                 ),
               ),
+              const SizedBox(height: 6),
+              Text(
+                'Ce téléphone affiche le QR. Les amis le scannent pour rejoindre, puis vous préparez le challenge.',
+                style: TextStyle(color: secondaryTextColor, fontSize: 12),
+              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -385,7 +395,7 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Le second téléphone peut scanner ce QR.',
+                        'Le téléphone ami scanne ce QR pour rejoindre votre session.',
                         style: TextStyle(
                           color: secondaryTextColor,
                           fontSize: 12,
@@ -411,6 +421,11 @@ class _ReceiveQuizScreenState extends State<ReceiveQuizScreen> {
                   fontWeight: FontWeight.w600,
                   color: textColor,
                 ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Ce téléphone rejoint la session de l\'hôte. La création du Défi entre amis reste côté hôte.',
+                style: TextStyle(color: secondaryTextColor, fontSize: 12),
               ),
               const SizedBox(height: 10),
               TextField(

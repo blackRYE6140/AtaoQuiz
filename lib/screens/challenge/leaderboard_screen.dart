@@ -47,6 +47,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     final profile = _profileService.profileOrDefault;
     if (profile.displayName == _profile.displayName &&
         profile.avatarIndex == _profile.avatarIndex &&
+        profile.profileImageBase64 == _profile.profileImageBase64 &&
         profile.isConfigured == _profile.isConfigured) {
       return;
     }
@@ -220,6 +221,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                         children: [
                           ProfileAvatar(
                             avatarIndex: _profile.avatarIndex,
+                            imageBase64: _profile.profileImageBase64,
                             radius: 18,
                             accentColor: primaryColor,
                           ),
@@ -330,6 +332,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                   leading: isLocal
                       ? ProfileAvatar(
                           avatarIndex: _profile.avatarIndex,
+                          imageBase64: _profile.profileImageBase64,
                           radius: 18,
                           accentColor: primaryColor,
                         )

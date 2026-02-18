@@ -4,11 +4,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 class UserProfile {
   final String displayName;
   final int avatarIndex;
+  final String? profileImageBase64;
   final bool isConfigured;
 
   const UserProfile({
     required this.displayName,
     required this.avatarIndex,
+    this.profileImageBase64,
     required this.isConfigured,
   });
 }
@@ -26,6 +28,7 @@ class UserProfileService extends ChangeNotifier {
 
   static const String _displayNameKey = 'user_profile_display_name_v1';
   static const String _avatarIndexKey = 'user_profile_avatar_index_v1';
+  static const String _profileImageKey = 'user_profile_image_base64_v1';
   static const String _configuredKey = 'user_profile_is_configured_v1';
   static const String _challengePromptShownKey =
       'user_profile_prompt_challenge_shown_v1';
@@ -41,6 +44,7 @@ class UserProfileService extends ChangeNotifier {
         const UserProfile(
           displayName: defaultDisplayName,
           avatarIndex: 0,
+          profileImageBase64: null,
           isConfigured: false,
         );
   }
@@ -70,20 +74,33 @@ class UserProfileService extends ChangeNotifier {
   Future<void> saveProfile({
     required String displayName,
     required int avatarIndex,
+    String? profileImageBase64,
+    bool clearProfileImage = false,
     bool markConfigured = true,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final normalizedName = normalizeDisplayName(displayName);
     final normalizedAvatar = _normalizeAvatarIndex(avatarIndex);
     final previous = await getProfile();
+    final normalizedImage = clearProfileImage
+        ? null
+        : _normalizeProfileImage(
+            profileImageBase64 ?? previous.profileImageBase64,
+          );
     final next = UserProfile(
       displayName: normalizedName,
       avatarIndex: normalizedAvatar,
+      profileImageBase64: normalizedImage,
       isConfigured: markConfigured || previous.isConfigured,
     );
 
     await prefs.setString(_displayNameKey, next.displayName);
     await prefs.setInt(_avatarIndexKey, next.avatarIndex);
+    if (next.profileImageBase64 == null) {
+      await prefs.remove(_profileImageKey);
+    } else {
+      await prefs.setString(_profileImageKey, next.profileImageBase64!);
+    }
     await prefs.setBool(_configuredKey, next.isConfigured);
     _cachedProfile = next;
     notifyListeners();
@@ -94,6 +111,7 @@ class UserProfileService extends ChangeNotifier {
     await saveProfile(
       displayName: displayName,
       avatarIndex: current.avatarIndex,
+      profileImageBase64: current.profileImageBase64,
       markConfigured: current.isConfigured,
     );
   }
@@ -120,6 +138,7 @@ class UserProfileService extends ChangeNotifier {
     final storedName = prefs.getString(_displayNameKey);
     final legacyName = prefs.getString(_legacyChallengeNameKey);
     final storedAvatar = prefs.getInt(_avatarIndexKey);
+    final storedProfileImage = prefs.getString(_profileImageKey);
     final storedConfigured = prefs.getBool(_configuredKey);
 
     final hasStoredName = storedName != null && storedName.trim().isNotEmpty;
@@ -134,6 +153,7 @@ class UserProfileService extends ChangeNotifier {
     return UserProfile(
       displayName: normalizeDisplayName(derivedName),
       avatarIndex: _normalizeAvatarIndex(storedAvatar ?? 0),
+      profileImageBase64: _normalizeProfileImage(storedProfileImage),
       isConfigured: isConfigured,
     );
   }
@@ -153,6 +173,17 @@ class UserProfileService extends ChangeNotifier {
       return value % avatarCount;
     }
     return value;
+  }
+
+  String? _normalizeProfileImage(String? value) {
+    if (value == null) {
+      return null;
+    }
+    final cleaned = value.trim();
+    if (cleaned.isEmpty) {
+      return null;
+    }
+    return cleaned;
   }
 
   static String normalizeDisplayName(String value) {

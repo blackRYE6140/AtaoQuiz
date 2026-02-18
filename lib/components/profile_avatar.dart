@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 class ProfileAvatarOption {
@@ -27,6 +30,7 @@ ProfileAvatarOption profileAvatarByIndex(int index) {
 
 class ProfileAvatar extends StatelessWidget {
   final int avatarIndex;
+  final String? imageBase64;
   final double radius;
   final Color accentColor;
   final Color? backgroundColor;
@@ -35,15 +39,29 @@ class ProfileAvatar extends StatelessWidget {
   const ProfileAvatar({
     super.key,
     required this.avatarIndex,
+    this.imageBase64,
     required this.radius,
     required this.accentColor,
     this.backgroundColor,
     this.borderWidth = 2.0,
   });
 
+  Uint8List? _decodeImage() {
+    final raw = imageBase64;
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+    try {
+      return base64Decode(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final avatar = profileAvatarByIndex(avatarIndex);
+    final imageBytes = _decodeImage();
     return Container(
       width: radius * 2,
       height: radius * 2,
@@ -55,7 +73,18 @@ class ProfileAvatar extends StatelessWidget {
           width: borderWidth,
         ),
       ),
-      child: Icon(avatar.icon, color: accentColor, size: radius),
+      child: imageBytes == null
+          ? Icon(avatar.icon, color: accentColor, size: radius)
+          : ClipOval(
+              child: Image.memory(
+                imageBytes,
+                fit: BoxFit.cover,
+                width: radius * 2,
+                height: radius * 2,
+                errorBuilder: (_, __, ___) =>
+                    Icon(avatar.icon, color: accentColor, size: radius),
+              ),
+            ),
     );
   }
 }

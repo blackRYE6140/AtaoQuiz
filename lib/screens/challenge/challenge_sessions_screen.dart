@@ -40,6 +40,8 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
   final TextEditingController _challengeNameController =
       TextEditingController();
   Timer? _reloadTimer;
+  String? _lastAutoOpenedIncomingNetworkId;
+  bool _isAutoOpeningIncomingChallenge = false;
 
   UserProfile _profile = const UserProfile(
     displayName: UserProfileService.defaultDisplayName,
@@ -90,6 +92,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
     final nextProfile = _profileService.profileOrDefault;
     if (nextProfile.displayName == _profile.displayName &&
         nextProfile.avatarIndex == _profile.avatarIndex &&
+        nextProfile.profileImageBase64 == _profile.profileImageBase64 &&
         nextProfile.isConfigured == _profile.isConfigured) {
       return;
     }
@@ -105,13 +108,16 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
       final quizzes = await _storageService.getQuizzes();
       final profile = await _profileService.getProfile();
       quizzes.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final completedSessions = sessions
+          .where((session) => _isSessionFinishedForProfile(session, profile))
+          .toList();
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _sessions = sessions;
+        _sessions = completedSessions;
         _quizzes = quizzes;
         _selectedQuiz = _resolveSelectedQuiz(
           selectedQuiz: _selectedQuiz,
@@ -120,6 +126,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
         _profile = profile;
         _isLoading = false;
       });
+      unawaited(_maybeAutoOpenIncomingNetworkChallenge());
       unawaited(_ensureProfileConfiguredOnce());
     } catch (_) {
       if (!mounted) {
@@ -129,6 +136,80 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
       unawaited(_ensureProfileConfiguredOnce());
     }
   }
+
+  bool _isSessionFinishedForProfile(
+    ChallengeSession session,
+    UserProfile profile,
+  ) {
+    final profileKey = _playerKey(profile.displayName);
+    for (final attempt in session.attempts) {
+      if (_playerKey(attempt.participantName) == profileKey) {
+        return true;
+      }
+    }
+
+    final networkId = session.networkSessionId;
+    if (networkId == null) {
+      return false;
+    }
+    final liveState = _transferService.getLiveChallengeByNetworkId(networkId);
+    if (liveState == null) {
+      return false;
+    }
+    for (final result in liveState.results) {
+      if (_playerKey(result.playerName) == profileKey) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<void> _maybeAutoOpenIncomingNetworkChallenge() async {
+    if (!mounted || _isAutoOpeningIncomingChallenge) {
+      return;
+    }
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      return;
+    }
+
+    final incoming = _transferService.activeLiveChallenge;
+    if (incoming == null || incoming.startedLocally) {
+      return;
+    }
+    if (_lastAutoOpenedIncomingNetworkId == incoming.networkSessionId) {
+      return;
+    }
+
+    final targetSession = await _challengeService.getSessionByNetworkSessionId(
+      incoming.networkSessionId,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (targetSession == null) {
+      return;
+    }
+
+    _lastAutoOpenedIncomingNetworkId = incoming.networkSessionId;
+    _isAutoOpeningIncomingChallenge = true;
+    try {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChallengeDetailScreen(sessionId: targetSession.id),
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
+      await _loadData();
+    } finally {
+      _isAutoOpeningIncomingChallenge = false;
+    }
+  }
+
+  String _playerKey(String value) => value.trim().toLowerCase();
 
   Quiz? _resolveSelectedQuiz({
     required Quiz? selectedQuiz,
@@ -279,6 +360,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
             ? AppColors.darkTextSecondary
             : AppColors.lightTextSecondary;
         final hasConnectedPeer = _transferService.connectedPeersCount > 0;
+        final isHostDevice = _transferService.isHosting;
 
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -318,6 +400,51 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                         },
                       ),
                       if (selectedMode == ChallengeMode.friends &&
+                          !isHostDevice) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: primaryColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Seul le téléphone hôte (celui qui affiche le QR) peut continuer en Défi entre amis.',
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontSize: 12,
+                                  fontFamily: 'Poppins',
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.pop(dialogContext);
+                                  Navigator.pushNamed(
+                                    parentContext,
+                                    '/transfer-quiz',
+                                  );
+                                },
+                                icon: const Icon(Icons.qr_code_2),
+                                label: const Text('Ouvrir Partage via Wi-Fi'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: primaryColor,
+                                  side: BorderSide(
+                                    color: primaryColor.withValues(alpha: 0.35),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (selectedMode == ChallengeMode.friends &&
+                          isHostDevice &&
                           !hasConnectedPeer) ...[
                         const SizedBox(height: 8),
                         Container(
@@ -429,71 +556,85 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                   child: Text('Annuler', style: TextStyle(color: primaryColor)),
                 ),
                 ElevatedButton(
-                  onPressed: () async {
-                    final dialogNavigator = Navigator.of(dialogContext);
-                    final parentNavigator = Navigator.of(parentContext);
-                    final hasPeerNow = _transferService.connectedPeersCount > 0;
-                    if (selectedMode == ChallengeMode.friends && !hasPeerNow) {
-                      final goToWifi = await showDialog<bool>(
-                        context: dialogContext,
-                        builder: (popupContext) {
-                          return AlertDialog(
-                            backgroundColor: isDark
-                                ? AppColors.darkCard
-                                : AppColors.lightCard,
-                            title: Text(
-                              'Aucun ami rejoint',
-                              style: TextStyle(
-                                fontFamily: 'Poppins',
-                                fontWeight: FontWeight.w600,
-                                color: textColor,
-                              ),
+                  onPressed:
+                      selectedMode == ChallengeMode.timed ||
+                          (selectedMode == ChallengeMode.friends &&
+                              isHostDevice &&
+                              hasConnectedPeer)
+                      ? () async {
+                          final dialogNavigator = Navigator.of(dialogContext);
+                          final parentNavigator = Navigator.of(parentContext);
+                          final hasPeerNow =
+                              _transferService.connectedPeersCount > 0;
+                          final isHostNow = _transferService.isHosting;
+                          if (selectedMode == ChallengeMode.friends &&
+                              !isHostNow) {
+                            return;
+                          }
+                          if (selectedMode == ChallengeMode.friends &&
+                              !hasPeerNow) {
+                            final goToWifi = await showDialog<bool>(
+                              context: dialogContext,
+                              builder: (popupContext) {
+                                return AlertDialog(
+                                  backgroundColor: isDark
+                                      ? AppColors.darkCard
+                                      : AppColors.lightCard,
+                                  title: Text(
+                                    'Aucun ami rejoint',
+                                    style: TextStyle(
+                                      fontFamily: 'Poppins',
+                                      fontWeight: FontWeight.w600,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  content: Text(
+                                    'Le défi entre amis nécessite au moins un autre téléphone connecté.\n'
+                                    'Passez par Partage via Wi‑Fi pour inviter un ami.',
+                                    style: TextStyle(
+                                      fontFamily: 'Poppins',
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(popupContext, false),
+                                      child: Text(
+                                        'Annuler',
+                                        style: TextStyle(color: primaryColor),
+                                      ),
+                                    ),
+                                    ElevatedButton.icon(
+                                      onPressed: () =>
+                                          Navigator.pop(popupContext, true),
+                                      icon: const Icon(Icons.wifi_tethering),
+                                      label: const Text('Partager via Wi-Fi'),
+                                    ),
+                                  ],
+                                );
+                              },
+                            );
+
+                            if (goToWifi == true) {
+                              dialogNavigator.pop();
+                              await parentNavigator.pushNamed('/transfer-quiz');
+                            }
+                            return;
+                          }
+
+                          Navigator.pop(
+                            dialogContext,
+                            _ChallengeCreationChoice(
+                              mode: selectedMode,
+                              timeLimitSeconds:
+                                  selectedMode == ChallengeMode.timed
+                                  ? selectedDuration
+                                  : null,
                             ),
-                            content: Text(
-                              'Le défi entre amis nécessite au moins un autre téléphone connecté.\n'
-                              'Passez par Partage via Wi‑Fi pour inviter un ami.',
-                              style: TextStyle(
-                                fontFamily: 'Poppins',
-                                color: textColor,
-                              ),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () =>
-                                    Navigator.pop(popupContext, false),
-                                child: Text(
-                                  'Annuler',
-                                  style: TextStyle(color: primaryColor),
-                                ),
-                              ),
-                              ElevatedButton.icon(
-                                onPressed: () =>
-                                    Navigator.pop(popupContext, true),
-                                icon: const Icon(Icons.wifi_tethering),
-                                label: const Text('Partager via Wi-Fi'),
-                              ),
-                            ],
                           );
-                        },
-                      );
-
-                      if (goToWifi == true) {
-                        dialogNavigator.pop();
-                        await parentNavigator.pushNamed('/transfer-quiz');
-                      }
-                      return;
-                    }
-
-                    Navigator.pop(
-                      dialogContext,
-                      _ChallengeCreationChoice(
-                        mode: selectedMode,
-                        timeLimitSeconds: selectedMode == ChallengeMode.timed
-                            ? selectedDuration
-                            : null,
-                      ),
-                    );
-                  },
+                        }
+                      : null,
                   child: const Text('Continuer'),
                 ),
               ],
@@ -694,6 +835,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                   children: [
                     ProfileAvatar(
                       avatarIndex: _profile.avatarIndex,
+                      imageBase64: _profile.profileImageBase64,
                       radius: 22,
                       accentColor: primaryColor,
                     ),
@@ -772,6 +914,11 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                 const SizedBox(height: 4),
                 Text(
                   'Astuce: lancez le serveur dans Transfert Wi-Fi puis démarrez un challenge réseau depuis le détail.',
+                  style: TextStyle(color: secondaryTextColor, fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Règle: en mode "Défi entre amis", seul le téléphone hôte (QR) peut continuer.',
                   style: TextStyle(color: secondaryTextColor, fontSize: 12),
                 ),
               ],
@@ -864,7 +1011,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'Challenges actifs (${_sessions.length})',
+            'Challenges terminés (${_sessions.length})',
             style: TextStyle(
               fontFamily: 'Poppins',
               fontWeight: FontWeight.w600,
@@ -878,7 +1025,7 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
               padding: const EdgeInsets.all(16),
               decoration: _cardDecoration(isDark, primaryColor),
               child: Text(
-                'Aucun challenge pour le moment.',
+                'Aucun challenge terminé pour le moment.',
                 style: TextStyle(color: secondaryTextColor),
               ),
             )
@@ -887,6 +1034,12 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
               final ranked = _challengeService.rankAttempts(session);
               final leader = ranked.isNotEmpty ? ranked.first : null;
               final participants = ranked.length;
+              final localProfileKey = _playerKey(_profile.displayName);
+              final rankIndex = ranked.indexWhere(
+                (attempt) =>
+                    _playerKey(attempt.participantName) == localProfileKey,
+              );
+              final myRank = rankIndex >= 0 ? rankIndex + 1 : null;
               final isNetwork = session.networkSessionId != null;
               final modeLabel = session.isTimed
                   ? 'Chrono ${_formatDurationFromSeconds(session.timeLimitSeconds!)}'
@@ -921,7 +1074,8 @@ class _ChallengeSessionsScreenState extends State<ChallengeSessionsScreen> {
                     '$modeLabel\n'
                     '${session.quizTitle} (${session.questionCount} questions)\n'
                     '${leader == null ? 'Aucun score' : 'Leader: ${leader.participantName} (${leader.score}/${leader.totalQuestions})'} • '
-                    '$participants participant(s)\n'
+                    '$participants participant(s) • '
+                    '${myRank == null ? 'Rang: --' : 'Votre rang: #$myRank'}\n'
                     'Créé le ${_formatDate(session.createdAt)}',
                     style: TextStyle(color: secondaryTextColor, fontSize: 12),
                   ),

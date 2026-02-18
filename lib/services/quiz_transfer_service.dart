@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:atao_quiz/services/challenge_service.dart';
 import 'package:atao_quiz/services/storage_service.dart';
+import 'package:atao_quiz/services/user_profile_service.dart';
 import 'package:flutter/foundation.dart';
 
 enum TransferConnectionState { disconnected, hosting, connecting, connected }
@@ -42,6 +43,8 @@ class TransferTarget {
 
 class LiveChallengePlayerResult {
   final String playerName;
+  final int? avatarIndex;
+  final String? profileImageBase64;
   final int score;
   final int totalQuestions;
   final int completionDurationMs;
@@ -49,6 +52,8 @@ class LiveChallengePlayerResult {
 
   const LiveChallengePlayerResult({
     required this.playerName,
+    this.avatarIndex,
+    this.profileImageBase64,
     required this.score,
     required this.totalQuestions,
     required this.completionDurationMs,
@@ -65,6 +70,8 @@ class LiveChallengePlayerResult {
   Map<String, dynamic> toJson() {
     return {
       'playerName': playerName,
+      'avatarIndex': avatarIndex,
+      'profileImageBase64': profileImageBase64,
       'score': score,
       'totalQuestions': totalQuestions,
       'completionDurationMs': completionDurationMs,
@@ -73,8 +80,16 @@ class LiveChallengePlayerResult {
   }
 
   factory LiveChallengePlayerResult.fromJson(Map<String, dynamic> json) {
+    final rawProfileImage = json['profileImageBase64']?.toString();
+    final normalizedProfileImage = rawProfileImage == null
+        ? null
+        : rawProfileImage.trim().isEmpty
+        ? null
+        : rawProfileImage.trim();
     return LiveChallengePlayerResult(
       playerName: json['playerName']?.toString() ?? 'Joueur',
+      avatarIndex: int.tryParse('${json['avatarIndex']}'),
+      profileImageBase64: normalizedProfileImage,
       score: int.tryParse('${json['score']}') ?? 0,
       totalQuestions: int.tryParse('${json['totalQuestions']}') ?? 0,
       completionDurationMs:
@@ -82,6 +97,29 @@ class LiveChallengePlayerResult {
       completedAt:
           DateTime.tryParse(json['completedAt']?.toString() ?? '') ??
           DateTime.now(),
+    );
+  }
+
+  LiveChallengePlayerResult copyWith({
+    String? playerName,
+    int? avatarIndex,
+    String? profileImageBase64,
+    bool clearProfileImage = false,
+    int? score,
+    int? totalQuestions,
+    int? completionDurationMs,
+    DateTime? completedAt,
+  }) {
+    return LiveChallengePlayerResult(
+      playerName: playerName ?? this.playerName,
+      avatarIndex: avatarIndex ?? this.avatarIndex,
+      profileImageBase64: clearProfileImage
+          ? null
+          : profileImageBase64 ?? this.profileImageBase64,
+      score: score ?? this.score,
+      totalQuestions: totalQuestions ?? this.totalQuestions,
+      completionDurationMs: completionDurationMs ?? this.completionDurationMs,
+      completedAt: completedAt ?? this.completedAt,
     );
   }
 }
@@ -95,6 +133,9 @@ class LiveChallengeSessionState {
   final int? timeLimitSeconds;
   final String? localSessionId;
   final String? localQuizId;
+  final String hostPlayerName;
+  final int? hostAvatarIndex;
+  final String? hostProfileImageBase64;
   final DateTime startedAt;
   final bool startedLocally;
   final LiveChallengeRoundPlan? pendingRound;
@@ -109,6 +150,9 @@ class LiveChallengeSessionState {
     required this.timeLimitSeconds,
     required this.localSessionId,
     required this.localQuizId,
+    required this.hostPlayerName,
+    required this.hostAvatarIndex,
+    required this.hostProfileImageBase64,
     required this.startedAt,
     required this.startedLocally,
     required this.pendingRound,
@@ -124,6 +168,10 @@ class LiveChallengeSessionState {
     int? timeLimitSeconds,
     String? localSessionId,
     String? localQuizId,
+    String? hostPlayerName,
+    int? hostAvatarIndex,
+    String? hostProfileImageBase64,
+    bool clearHostProfileImage = false,
     DateTime? startedAt,
     bool? startedLocally,
     LiveChallengeRoundPlan? pendingRound,
@@ -139,6 +187,11 @@ class LiveChallengeSessionState {
       timeLimitSeconds: timeLimitSeconds ?? this.timeLimitSeconds,
       localSessionId: localSessionId ?? this.localSessionId,
       localQuizId: localQuizId ?? this.localQuizId,
+      hostPlayerName: hostPlayerName ?? this.hostPlayerName,
+      hostAvatarIndex: hostAvatarIndex ?? this.hostAvatarIndex,
+      hostProfileImageBase64: clearHostProfileImage
+          ? null
+          : hostProfileImageBase64 ?? this.hostProfileImageBase64,
       startedAt: startedAt ?? this.startedAt,
       startedLocally: startedLocally ?? this.startedLocally,
       pendingRound: clearPendingRound
@@ -511,6 +564,8 @@ class QuizTransferService extends ChangeNotifier {
     required ChallengeSession session,
     required Quiz quiz,
     required String hostPlayerName,
+    int? hostAvatarIndex,
+    String? hostProfileImageBase64,
   }) async {
     if (!isConnected) {
       throw StateError('Aucun pair connecté.');
@@ -527,6 +582,13 @@ class QuizTransferService extends ChangeNotifier {
 
     final cleanQuiz = _sanitizeOutgoingQuiz(quiz);
     final startedAt = DateTime.now();
+    final normalizedHostName = hostPlayerName.trim().isEmpty
+        ? 'Hôte'
+        : hostPlayerName.trim();
+    final normalizedHostAvatar = _normalizeAvatarIndex(hostAvatarIndex);
+    final normalizedHostImage = _normalizeOptionalString(
+      hostProfileImageBase64,
+    );
 
     _liveChallenges[networkSessionId] = LiveChallengeSessionState(
       networkSessionId: networkSessionId,
@@ -537,6 +599,9 @@ class QuizTransferService extends ChangeNotifier {
       timeLimitSeconds: session.timeLimitSeconds,
       localSessionId: session.id,
       localQuizId: quiz.id,
+      hostPlayerName: normalizedHostName,
+      hostAvatarIndex: normalizedHostAvatar,
+      hostProfileImageBase64: normalizedHostImage,
       startedAt: startedAt,
       startedLocally: true,
       pendingRound: null,
@@ -552,7 +617,9 @@ class QuizTransferService extends ChangeNotifier {
       'questionCount': session.questionCount,
       'mode': session.mode,
       'timeLimitSeconds': session.timeLimitSeconds,
-      'hostPlayerName': hostPlayerName.trim(),
+      'hostPlayerName': normalizedHostName,
+      'hostAvatarIndex': normalizedHostAvatar,
+      'hostProfileImageBase64': normalizedHostImage,
       'startedAt': startedAt.toIso8601String(),
       'quiz': cleanQuiz.toJson(),
     });
@@ -612,6 +679,9 @@ class QuizTransferService extends ChangeNotifier {
       'questionCount': state.questionCount,
       'mode': state.mode,
       'timeLimitSeconds': state.timeLimitSeconds,
+      'hostPlayerName': state.hostPlayerName,
+      'hostAvatarIndex': state.hostAvatarIndex,
+      'hostProfileImageBase64': state.hostProfileImageBase64,
       'startedBy': roundPlan.startedBy,
       'countdownSeconds': normalizedCountdown,
       'roundTimeLimitSeconds': normalizedTimeLimit,
@@ -633,6 +703,8 @@ class QuizTransferService extends ChangeNotifier {
   Future<void> submitLiveChallengeResult({
     required String networkSessionId,
     required String participantName,
+    int? participantAvatarIndex,
+    String? participantProfileImageBase64,
     required int score,
     required int totalQuestions,
     required int completionDurationMs,
@@ -654,6 +726,10 @@ class QuizTransferService extends ChangeNotifier {
 
     final result = LiveChallengePlayerResult(
       playerName: normalizedName,
+      avatarIndex: _normalizeAvatarIndex(participantAvatarIndex),
+      profileImageBase64: _normalizeOptionalString(
+        participantProfileImageBase64,
+      ),
       score: score,
       totalQuestions: totalQuestions,
       completionDurationMs: completionDurationMs,
@@ -922,6 +998,15 @@ class QuizTransferService extends ChangeNotifier {
         envelope['sessionName']?.toString() ?? 'Challenge réseau';
     final mode = envelope['mode']?.toString() ?? ChallengeMode.friends;
     final timeLimitSeconds = int.tryParse('${envelope['timeLimitSeconds']}');
+    final hostName = _normalizeOptionalString(
+      envelope['hostPlayerName']?.toString(),
+    );
+    final hostAvatar = _normalizeAvatarIndex(
+      int.tryParse('${envelope['hostAvatarIndex']}'),
+    );
+    final hostImage = _normalizeOptionalString(
+      envelope['hostProfileImageBase64']?.toString(),
+    );
     final quizRaw = envelope['quiz'];
     if (networkSessionId.isEmpty || quizRaw is! Map<String, dynamic>) {
       _appendHistory(
@@ -959,6 +1044,9 @@ class QuizTransferService extends ChangeNotifier {
         timeLimitSeconds: session.timeLimitSeconds,
         localSessionId: session.id,
         localQuizId: preparedQuiz.id,
+        hostPlayerName: hostName ?? 'Hôte',
+        hostAvatarIndex: hostAvatar,
+        hostProfileImageBase64: hostImage,
         startedAt: startedAt,
         startedLocally: false,
         pendingRound: null,
@@ -1048,6 +1136,15 @@ class QuizTransferService extends ChangeNotifier {
         ? roundTimeLimitSeconds
         : null;
     final startedBy = envelope['startedBy']?.toString().trim();
+    final hostName = _normalizeOptionalString(
+      envelope['hostPlayerName']?.toString(),
+    );
+    final hostAvatar = _normalizeAvatarIndex(
+      int.tryParse('${envelope['hostAvatarIndex']}'),
+    );
+    final hostImage = _normalizeOptionalString(
+      envelope['hostProfileImageBase64']?.toString(),
+    );
     final existing = _liveChallenges[networkSessionId];
     final roundPlan = LiveChallengeRoundPlan(
       roundId: roundId,
@@ -1067,6 +1164,9 @@ class QuizTransferService extends ChangeNotifier {
         timeLimitSeconds: int.tryParse('${envelope['timeLimitSeconds']}'),
         localSessionId: null,
         localQuizId: null,
+        hostPlayerName: hostName ?? 'Hôte',
+        hostAvatarIndex: hostAvatar,
+        hostProfileImageBase64: hostImage,
         startedAt: announcedAt,
         startedLocally: false,
         pendingRound: roundPlan,
@@ -1074,6 +1174,9 @@ class QuizTransferService extends ChangeNotifier {
       );
     } else {
       _liveChallenges[networkSessionId] = existing.copyWith(
+        hostPlayerName: hostName ?? existing.hostPlayerName,
+        hostAvatarIndex: hostAvatar ?? existing.hostAvatarIndex,
+        hostProfileImageBase64: hostImage ?? existing.hostProfileImageBase64,
         pendingRound: roundPlan,
       );
     }
@@ -1112,6 +1215,15 @@ class QuizTransferService extends ChangeNotifier {
     }
 
     final existing = _liveChallenges[networkSessionId];
+    final hostName = _normalizeOptionalString(
+      envelope['hostPlayerName']?.toString(),
+    );
+    final hostAvatar = _normalizeAvatarIndex(
+      int.tryParse('${envelope['hostAvatarIndex']}'),
+    );
+    final hostImage = _normalizeOptionalString(
+      envelope['hostProfileImageBase64']?.toString(),
+    );
     final startedAt =
         DateTime.tryParse(envelope['startedAt']?.toString() ?? '') ??
         existing?.startedAt ??
@@ -1172,6 +1284,9 @@ class QuizTransferService extends ChangeNotifier {
           existing?.timeLimitSeconds,
       localSessionId: existing?.localSessionId,
       localQuizId: existing?.localQuizId,
+      hostPlayerName: hostName ?? existing?.hostPlayerName ?? 'Hôte',
+      hostAvatarIndex: hostAvatar ?? existing?.hostAvatarIndex,
+      hostProfileImageBase64: hostImage ?? existing?.hostProfileImageBase64,
       startedAt: startedAt,
       startedLocally: existing?.startedLocally ?? false,
       pendingRound: pendingRound,
@@ -1295,6 +1410,9 @@ class QuizTransferService extends ChangeNotifier {
       timeLimitSeconds: existing?.timeLimitSeconds,
       localSessionId: existing?.localSessionId,
       localQuizId: existing?.localQuizId,
+      hostPlayerName: existing?.hostPlayerName ?? 'Hôte',
+      hostAvatarIndex: existing?.hostAvatarIndex,
+      hostProfileImageBase64: existing?.hostProfileImageBase64,
       startedAt: existing?.startedAt ?? DateTime.now(),
       startedLocally: existing?.startedLocally ?? false,
       pendingRound: existing?.pendingRound,
@@ -1314,11 +1432,29 @@ class QuizTransferService extends ChangeNotifier {
     for (final item in incoming) {
       final key = _playerKey(item.playerName);
       final existing = byPlayer[key];
-      if (existing == null || _isBetterLiveResult(item, existing)) {
+      if (existing == null) {
         byPlayer[key] = item;
+        continue;
       }
+      final preferred = _isBetterLiveResult(item, existing) ? item : existing;
+      final fallback = _isBetterLiveResult(item, existing) ? existing : item;
+      byPlayer[key] = _mergeResultIdentity(preferred, fallback);
     }
     return byPlayer.values.toList();
+  }
+
+  LiveChallengePlayerResult _mergeResultIdentity(
+    LiveChallengePlayerResult preferred,
+    LiveChallengePlayerResult fallback,
+  ) {
+    final preferredImage = _normalizeOptionalString(
+      preferred.profileImageBase64,
+    );
+    final fallbackImage = _normalizeOptionalString(fallback.profileImageBase64);
+    return preferred.copyWith(
+      avatarIndex: preferred.avatarIndex ?? fallback.avatarIndex,
+      profileImageBase64: preferredImage ?? fallbackImage,
+    );
   }
 
   List<LiveChallengePlayerResult> _sortLiveResults(
@@ -1419,6 +1555,9 @@ class QuizTransferService extends ChangeNotifier {
       'questionCount': state.questionCount,
       'mode': state.mode,
       'timeLimitSeconds': state.timeLimitSeconds,
+      'hostPlayerName': state.hostPlayerName,
+      'hostAvatarIndex': state.hostAvatarIndex,
+      'hostProfileImageBase64': state.hostProfileImageBase64,
       'startedAt': state.startedAt.toIso8601String(),
       'pendingRoundId': state.pendingRound?.roundId,
       'pendingRoundStartsAt': state.pendingRound?.startsAt.toIso8601String(),
@@ -1471,7 +1610,9 @@ class QuizTransferService extends ChangeNotifier {
       'questionCount': active.questionCount,
       'mode': active.mode,
       'timeLimitSeconds': active.timeLimitSeconds,
-      'hostPlayerName': 'Hôte',
+      'hostPlayerName': active.hostPlayerName,
+      'hostAvatarIndex': active.hostAvatarIndex,
+      'hostProfileImageBase64': active.hostProfileImageBase64,
       'startedAt': active.startedAt.toIso8601String(),
       'quiz': cleanQuiz.toJson(),
     });
@@ -1487,6 +1628,9 @@ class QuizTransferService extends ChangeNotifier {
         'questionCount': active.questionCount,
         'mode': active.mode,
         'timeLimitSeconds': active.timeLimitSeconds,
+        'hostPlayerName': active.hostPlayerName,
+        'hostAvatarIndex': active.hostAvatarIndex,
+        'hostProfileImageBase64': active.hostProfileImageBase64,
         'startedBy': pendingRound.startedBy,
         'roundTimeLimitSeconds': pendingRound.timeLimitSeconds,
         'startsAt': pendingRound.startsAt.toIso8601String(),
@@ -1507,6 +1651,9 @@ class QuizTransferService extends ChangeNotifier {
       'questionCount': active.questionCount,
       'mode': active.mode,
       'timeLimitSeconds': active.timeLimitSeconds,
+      'hostPlayerName': active.hostPlayerName,
+      'hostAvatarIndex': active.hostAvatarIndex,
+      'hostProfileImageBase64': active.hostProfileImageBase64,
       'startedAt': active.startedAt.toIso8601String(),
       'pendingRoundId': active.pendingRound?.roundId,
       'pendingRoundStartsAt': active.pendingRound?.startsAt.toIso8601String(),
@@ -1568,6 +1715,24 @@ class QuizTransferService extends ChangeNotifier {
     if (_history.length > _maxHistoryItems) {
       _history.removeRange(_maxHistoryItems, _history.length);
     }
+  }
+
+  static String? _normalizeOptionalString(String? value) {
+    if (value == null) {
+      return null;
+    }
+    final cleaned = value.trim();
+    if (cleaned.isEmpty) {
+      return null;
+    }
+    return cleaned;
+  }
+
+  int? _normalizeAvatarIndex(int? value) {
+    if (value == null || value < 0) {
+      return null;
+    }
+    return value % UserProfileService.avatarCount;
   }
 
   String _playerKey(String name) => name.trim().toLowerCase();

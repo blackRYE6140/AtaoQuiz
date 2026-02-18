@@ -153,6 +153,7 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> with WidgetsBindingObserver {
       debugShowCheckedModeBanner: false,
       navigatorKey: _navigatorKey,
       navigatorObservers: [_routeObserver],
+      scrollBehavior: _NoLineScrollBehavior(),
       themeMode: _themeMode,
       theme: _lightTheme,
       darkTheme: _darkTheme,
@@ -175,11 +176,44 @@ class _AtaoQuizAppState extends State<AtaoQuizApp> with WidgetsBindingObserver {
   }
 }
 
+class _NoLineScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child;
+  }
+
+  @override
+  Widget buildScrollbar(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child;
+  }
+}
+
 /// Thème clair
 final ThemeData _lightTheme = ThemeData(
+  useMaterial3: true,
   brightness: Brightness.light,
   primaryColor: AppColors.primaryBlue,
   scaffoldBackgroundColor: AppColors.lightBackground,
+  appBarTheme: const AppBarTheme(
+    elevation: 0,
+    scrolledUnderElevation: 0,
+    shadowColor: Colors.transparent,
+    surfaceTintColor: Colors.transparent,
+  ),
+  tabBarTheme: const TabBarThemeData(dividerColor: Colors.transparent),
+  dividerTheme: const DividerThemeData(
+    color: Colors.transparent,
+    thickness: 0,
+    space: 0,
+  ),
   textTheme: const TextTheme(
     bodyMedium: TextStyle(fontFamily: 'Poppins', color: AppColors.lightText),
   ),
@@ -214,9 +248,22 @@ class _AppRouteObserver extends NavigatorObserver {
 
 /// Thème sombre
 final ThemeData _darkTheme = ThemeData(
+  useMaterial3: true,
   brightness: Brightness.dark,
   primaryColor: AppColors.accentYellow,
   scaffoldBackgroundColor: AppColors.darkBackground,
+  appBarTheme: const AppBarTheme(
+    elevation: 0,
+    scrolledUnderElevation: 0,
+    shadowColor: Colors.transparent,
+    surfaceTintColor: Colors.transparent,
+  ),
+  tabBarTheme: const TabBarThemeData(dividerColor: Colors.transparent),
+  dividerTheme: const DividerThemeData(
+    color: Colors.transparent,
+    thickness: 0,
+    space: 0,
+  ),
   textTheme: const TextTheme(
     bodyMedium: TextStyle(fontFamily: 'Poppins', color: AppColors.darkText),
   ),

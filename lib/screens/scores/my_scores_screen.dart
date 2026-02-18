@@ -170,6 +170,8 @@ class _MyScoresScreenState extends State<MyScoresScreen> {
         appBar: AppBar(
           elevation: 0,
           scrolledUnderElevation: 0,
+          shadowColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
           backgroundColor: Colors.transparent,
           iconTheme: IconThemeData(color: primaryColor),
           title: Text(
@@ -182,6 +184,7 @@ class _MyScoresScreenState extends State<MyScoresScreen> {
           ),
           bottom: TabBar(
             indicatorColor: primaryColor,
+            dividerColor: Colors.transparent,
             labelColor: primaryColor,
             unselectedLabelColor: secondaryTextColor,
             tabs: const [

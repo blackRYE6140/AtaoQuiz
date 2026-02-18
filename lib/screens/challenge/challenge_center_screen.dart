@@ -28,6 +28,8 @@ class ChallengeCenterScreen extends StatelessWidget {
         appBar: AppBar(
           elevation: 0,
           scrolledUnderElevation: 0,
+          shadowColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
           backgroundColor: Colors.transparent,
           centerTitle: true,
           iconTheme: IconThemeData(color: primaryColor),
@@ -41,6 +43,7 @@ class ChallengeCenterScreen extends StatelessWidget {
           ),
           bottom: TabBar(
             indicatorColor: primaryColor,
+            dividerColor: Colors.transparent,
             labelColor: primaryColor,
             unselectedLabelColor: isDark
                 ? AppColors.darkTextSecondary

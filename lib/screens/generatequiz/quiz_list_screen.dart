@@ -13,6 +13,26 @@ class QuizListScreen extends StatefulWidget {
   State<QuizListScreen> createState() => _QuizListScreenState();
 }
 
+class _NoLineScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child;
+  }
+
+  @override
+  Widget buildScrollbar(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child;
+  }
+}
+
 class _QuizListScreenState extends State<QuizListScreen> {
   final StorageService _storageService = StorageService();
   final ChallengeService _challengeService = ChallengeService();
@@ -147,6 +167,27 @@ class _QuizListScreenState extends State<QuizListScreen> {
     return Colors.red;
   }
 
+  TextStyle _listTitleStyle({
+    required bool isDark,
+    required Color primaryColor,
+  }) {
+    return TextStyle(
+      fontFamily: 'Poppins',
+      fontSize: 16,
+      fontWeight: FontWeight.w600,
+      color: primaryColor,
+      shadows: [
+        Shadow(
+          color: (isDark ? Colors.black : Colors.black87).withValues(
+            alpha: isDark ? 0.36 : 0.18,
+          ),
+          blurRadius: 6,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    );
+  }
+
   Widget _buildQuizList({
     required BuildContext context,
     required bool isDark,
@@ -154,6 +195,7 @@ class _QuizListScreenState extends State<QuizListScreen> {
     required Color textColor,
     required Color secondaryTextColor,
     required List<Quiz> quizzes,
+    required String title,
     required String emptyMessage,
     required IconData emptyIcon,
     required bool transferredTab,
@@ -162,6 +204,16 @@ class _QuizListScreenState extends State<QuizListScreen> {
       return ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              title,
+              style: _listTitleStyle(
+                isDark: isDark,
+                primaryColor: primaryColor,
+              ),
+            ),
+          ),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: _cardDecoration(isDark),
@@ -187,99 +239,106 @@ class _QuizListScreenState extends State<QuizListScreen> {
       );
     }
 
-    return ListView.builder(
+    return ListView(
       padding: const EdgeInsets.all(16),
-      itemCount: quizzes.length,
-      itemBuilder: (context, index) {
-        final quiz = quizzes[index];
-        final scoreColor = _scoreColor(quiz, secondaryTextColor);
-        final dateLabel = transferredTab
-            ? _formatDate(quiz.receivedAt ?? quiz.createdAt)
-            : _formatDate(quiz.createdAt);
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Text(
+            '$title (${quizzes.length})',
+            style: _listTitleStyle(isDark: isDark, primaryColor: primaryColor),
+          ),
+        ),
+        ...quizzes.map((quiz) {
+          final scoreColor = _scoreColor(quiz, secondaryTextColor);
+          final dateLabel = transferredTab
+              ? _formatDate(quiz.receivedAt ?? quiz.createdAt)
+              : _formatDate(quiz.createdAt);
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          decoration: _cardDecoration(isDark),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 6,
-            ),
-            leading: CircleAvatar(
-              backgroundColor: _getDifficultyColor(quiz.difficulty),
-              child: Icon(
-                quiz.isTransferred ? Icons.download_done : Icons.quiz,
-                color: Colors.black,
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            decoration: _cardDecoration(isDark),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 6,
               ),
-            ),
-            title: Text(
-              quiz.title,
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                fontWeight: FontWeight.w600,
-                color: textColor,
+              leading: CircleAvatar(
+                backgroundColor: _getDifficultyColor(quiz.difficulty),
+                child: Icon(
+                  quiz.isTransferred ? Icons.download_done : Icons.quiz,
+                  color: Colors.black,
+                ),
               ),
-            ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 4),
-                Text(
-                  '${quiz.questionCount} questions • ${quiz.difficulty} • ${quiz.pdfFileName}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: secondaryTextColor),
+              title: Text(
+                quiz.title,
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '${transferredTab ? 'Reçu le' : 'Créé le'} $dateLabel'
-                  '${quiz.isTransferred ? ' • Transféré via Wi‑Fi' : ''}',
-                  style: TextStyle(fontSize: 12, color: secondaryTextColor),
-                ),
-                if (quiz.score != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Row(
-                      children: [
-                        Icon(Icons.score, size: 14, color: scoreColor),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Score: ${quiz.score}/${quiz.questionCount}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: scoreColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-            trailing: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 72),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (quiz.score == null)
-                    IconButton(
-                      icon: Icon(Icons.play_arrow, color: primaryColor),
-                      onPressed: () => _playQuiz(quiz),
-                    ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.delete_outline,
-                      color: primaryColor.withValues(alpha: 0.75),
-                    ),
-                    onPressed: () => _deleteQuiz(quiz.id),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${quiz.questionCount} questions • ${quiz.difficulty} • ${quiz.pdfFileName}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: secondaryTextColor),
                   ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${transferredTab ? 'Reçu le' : 'Créé le'} $dateLabel'
+                    '${quiz.isTransferred ? ' • Transféré via Wi‑Fi' : ''}',
+                    style: TextStyle(fontSize: 12, color: secondaryTextColor),
+                  ),
+                  if (quiz.score != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Row(
+                        children: [
+                          Icon(Icons.score, size: 14, color: scoreColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Score: ${quiz.score}/${quiz.questionCount}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: scoreColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
+              trailing: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 72),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (quiz.score == null)
+                      IconButton(
+                        icon: Icon(Icons.play_arrow, color: primaryColor),
+                        onPressed: () => _playQuiz(quiz),
+                      ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.delete_outline,
+                        color: primaryColor.withValues(alpha: 0.75),
+                      ),
+                      onPressed: () => _deleteQuiz(quiz.id),
+                    ),
+                  ],
+                ),
+              ),
+              onTap: () => _playQuiz(quiz),
             ),
-            onTap: () => _playQuiz(quiz),
-          ),
-        );
-      },
+          );
+        }),
+      ],
     );
   }
 
@@ -294,6 +353,16 @@ class _QuizListScreenState extends State<QuizListScreen> {
       return ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              'Défis amis',
+              style: _listTitleStyle(
+                isDark: isDark,
+                primaryColor: primaryColor,
+              ),
+            ),
+          ),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: _cardDecoration(isDark),
@@ -319,53 +388,60 @@ class _QuizListScreenState extends State<QuizListScreen> {
       );
     }
 
-    return ListView.builder(
+    return ListView(
       padding: const EdgeInsets.all(16),
-      itemCount: _friendChallenges.length,
-      itemBuilder: (context, index) {
-        final session = _friendChallenges[index];
-        final ranked = _challengeService.rankAttempts(session);
-        final leader = ranked.isNotEmpty ? ranked.first : null;
-        final participants = ranked.length;
-        final isNetwork = session.networkSessionId != null;
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          decoration: _cardDecoration(isDark),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 6,
-            ),
-            leading: CircleAvatar(
-              backgroundColor: primaryColor.withValues(alpha: 0.18),
-              child: Icon(Icons.groups, color: primaryColor),
-            ),
-            title: Text(
-              session.name,
-              style: TextStyle(
-                color: textColor,
-                fontFamily: 'Poppins',
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            subtitle: Text(
-              '${isNetwork ? 'Réseau Wi‑Fi' : 'Local'} • ${session.quizTitle}\n'
-              '${session.questionCount} questions • '
-              '${leader == null ? 'Aucun score' : 'Leader: ${leader.participantName} (${leader.score}/${leader.totalQuestions})'}\n'
-              '$participants participant(s) • ${_formatDate(session.createdAt)}',
-              style: TextStyle(color: secondaryTextColor, fontSize: 12),
-            ),
-            isThreeLine: true,
-            trailing: Icon(
-              Icons.arrow_forward_ios,
-              size: 16,
-              color: primaryColor,
-            ),
-            onTap: () => _openFriendChallenge(session),
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Text(
+            'Défis amis (${_friendChallenges.length})',
+            style: _listTitleStyle(isDark: isDark, primaryColor: primaryColor),
           ),
-        );
-      },
+        ),
+        ..._friendChallenges.map((session) {
+          final ranked = _challengeService.rankAttempts(session);
+          final leader = ranked.isNotEmpty ? ranked.first : null;
+          final participants = ranked.length;
+          final isNetwork = session.networkSessionId != null;
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            decoration: _cardDecoration(isDark),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 6,
+              ),
+              leading: CircleAvatar(
+                backgroundColor: primaryColor.withValues(alpha: 0.18),
+                child: Icon(Icons.groups, color: primaryColor),
+              ),
+              title: Text(
+                session.name,
+                style: TextStyle(
+                  color: textColor,
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                '${isNetwork ? 'Réseau Wi‑Fi' : 'Local'} • ${session.quizTitle}\n'
+                '${session.questionCount} questions • '
+                '${leader == null ? 'Aucun score' : 'Leader: ${leader.participantName} (${leader.score}/${leader.totalQuestions})'}\n'
+                '$participants participant(s) • ${_formatDate(session.createdAt)}',
+                style: TextStyle(color: secondaryTextColor, fontSize: 12),
+              ),
+              isThreeLine: true,
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: primaryColor,
+              ),
+              onTap: () => _openFriendChallenge(session),
+            ),
+          );
+        }),
+      ],
     );
   }
 
@@ -380,98 +456,129 @@ class _QuizListScreenState extends State<QuizListScreen> {
         ? AppColors.darkTextSecondary
         : AppColors.lightTextSecondary;
 
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        backgroundColor: isDark
-            ? AppColors.darkBackground
-            : AppColors.lightBackground,
-        appBar: AppBar(
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          backgroundColor: Colors.transparent,
-          centerTitle: true,
-          iconTheme: IconThemeData(color: primaryColor),
-          title: Text(
-            'Mes Quiz',
-            style: TextStyle(
-              fontFamily: 'Poppins',
-              fontWeight: FontWeight.w600,
-              color: primaryColor,
+    return ScrollConfiguration(
+      behavior: _NoLineScrollBehavior(),
+      child: DefaultTabController(
+        length: 3,
+        child: Scaffold(
+          backgroundColor: isDark
+              ? AppColors.darkBackground
+              : AppColors.lightBackground,
+          appBar: AppBar(
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            shadowColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            backgroundColor: Colors.transparent,
+            centerTitle: true,
+            iconTheme: IconThemeData(color: primaryColor),
+            title: Text(
+              'Mes Quiz',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w600,
+                color: primaryColor,
+              ),
             ),
-          ),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => Navigator.pop(context),
-          ),
-          actions: [
-            IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
-          ],
-          bottom: TabBar(
-            isScrollable: true,
-            indicatorColor: primaryColor,
-            labelColor: primaryColor,
-            unselectedLabelColor: secondaryTextColor,
-            tabs: const [
-              Tab(text: 'Quiz générés'),
-              Tab(text: 'Transférés Wi‑Fi'),
-              Tab(text: 'Défis amis'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.pop(context),
+            ),
+            actions: [
+              IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
             ],
-          ),
-        ),
-        body: _isLoading
-            ? Center(child: CircularProgressIndicator(color: primaryColor))
-            : TabBarView(
-                children: [
-                  RefreshIndicator(
-                    onRefresh: _loadData,
-                    color: primaryColor,
-                    child: _buildQuizList(
-                      context: context,
-                      isDark: isDark,
-                      primaryColor: primaryColor,
-                      textColor: textColor,
-                      secondaryTextColor: secondaryTextColor,
-                      quizzes: _generatedQuizzes,
-                      emptyMessage: 'Aucun quiz généré pour le moment.',
-                      emptyIcon: Icons.quiz_outlined,
-                      transferredTab: false,
-                    ),
-                  ),
-                  RefreshIndicator(
-                    onRefresh: _loadData,
-                    color: primaryColor,
-                    child: _buildQuizList(
-                      context: context,
-                      isDark: isDark,
-                      primaryColor: primaryColor,
-                      textColor: textColor,
-                      secondaryTextColor: secondaryTextColor,
-                      quizzes: _transferredQuizzes,
-                      emptyMessage: 'Aucun quiz transféré via Wi‑Fi.',
-                      emptyIcon: Icons.wifi_tethering,
-                      transferredTab: true,
-                    ),
-                  ),
-                  RefreshIndicator(
-                    onRefresh: _loadData,
-                    color: primaryColor,
-                    child: _buildFriendChallengesList(
-                      context: context,
-                      isDark: isDark,
-                      primaryColor: primaryColor,
-                      textColor: textColor,
-                      secondaryTextColor: secondaryTextColor,
-                    ),
+            bottom: TabBar(
+              isScrollable: false,
+              indicatorColor: primaryColor,
+              indicatorSize: TabBarIndicatorSize.tab,
+              dividerColor: Colors.transparent,
+              labelColor: primaryColor,
+              unselectedLabelColor: secondaryTextColor,
+              labelStyle: const TextStyle(
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w600,
+                shadows: [
+                  Shadow(
+                    color: Colors.black26,
+                    blurRadius: 4,
+                    offset: Offset(0, 1),
                   ),
                 ],
               ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _openCreateQuiz,
-          backgroundColor: primaryColor,
-          foregroundColor: isDark ? Colors.black : Colors.white,
-          icon: const Icon(Icons.add),
-          label: const Text('Créer un quiz'),
+              unselectedLabelStyle: const TextStyle(
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w500,
+                shadows: [
+                  Shadow(
+                    color: Colors.black12,
+                    blurRadius: 2,
+                    offset: Offset(0, 1),
+                  ),
+                ],
+              ),
+              tabs: const [
+                Tab(text: 'Quiz générés'),
+                Tab(text: 'Transférés Wi‑Fi'),
+                Tab(text: 'Défis amis'),
+              ],
+            ),
+          ),
+          body: _isLoading
+              ? Center(child: CircularProgressIndicator(color: primaryColor))
+              : TabBarView(
+                  children: [
+                    RefreshIndicator(
+                      onRefresh: _loadData,
+                      color: primaryColor,
+                      child: _buildQuizList(
+                        context: context,
+                        isDark: isDark,
+                        primaryColor: primaryColor,
+                        textColor: textColor,
+                        secondaryTextColor: secondaryTextColor,
+                        quizzes: _generatedQuizzes,
+                        title: 'Quiz générés',
+                        emptyMessage: 'Aucun quiz généré pour le moment.',
+                        emptyIcon: Icons.quiz_outlined,
+                        transferredTab: false,
+                      ),
+                    ),
+                    RefreshIndicator(
+                      onRefresh: _loadData,
+                      color: primaryColor,
+                      child: _buildQuizList(
+                        context: context,
+                        isDark: isDark,
+                        primaryColor: primaryColor,
+                        textColor: textColor,
+                        secondaryTextColor: secondaryTextColor,
+                        quizzes: _transferredQuizzes,
+                        title: 'Quiz transférés',
+                        emptyMessage: 'Aucun quiz transféré via Wi‑Fi.',
+                        emptyIcon: Icons.wifi_tethering,
+                        transferredTab: true,
+                      ),
+                    ),
+                    RefreshIndicator(
+                      onRefresh: _loadData,
+                      color: primaryColor,
+                      child: _buildFriendChallengesList(
+                        context: context,
+                        isDark: isDark,
+                        primaryColor: primaryColor,
+                        textColor: textColor,
+                        secondaryTextColor: secondaryTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: _openCreateQuiz,
+            backgroundColor: primaryColor,
+            foregroundColor: isDark ? Colors.black : Colors.white,
+            icon: const Icon(Icons.add),
+            label: const Text('Créer un quiz'),
+          ),
         ),
       ),
     );
